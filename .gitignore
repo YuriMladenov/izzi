@@ -1,0 +1,9 @@
+archive/
+state/
+captures/
+*.har
+__pycache__/
+.venv/
+*.pyc
+tools/pip-cache/
+tools/mitmproxy/
