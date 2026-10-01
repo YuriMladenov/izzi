@@ -1,6 +1,7 @@
 import html,json,mimetypes,re,time
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from pathlib import Path
+from html.parser import HTMLParser
 from urllib.parse import quote,unquote,urlparse
 from config import *
 from media_mapping import lesson_media
@@ -42,8 +43,8 @@ def score(r):
     if r.get("source")=="capture_proxy_v3.2": s+=100
     return s
 
-def pick(rs):
-    good=[r for r in (rs or []) if score(r)>-10000]
+def pick(rs,usable=None):
+    good=[r for r in (rs or []) if score(r)>-10000 and (usable is None or usable(r))]
     return max(enumerate(good),key=lambda x:(score(x[1]),x[0]))[1] if good else None
 
 def logical_path(path):
@@ -72,7 +73,7 @@ def _canon_path(path):
             return tail
     return path
 
-def find(m,host,path,q):
+def find(m,host,path,q,usable=None):
     """Resolve from the URL map itself.
 
     Exact URL is preferred. For IZZI resources we then compare canonical paths
@@ -84,7 +85,7 @@ def find(m,host,path,q):
     for scheme in ("https","http"):
         for h in (host, host.split(":",1)[0]):
             u=f"{scheme}://{h}{requested_path}"+(("?"+q) if q else "")
-            r=pick(m.get(u))
+            r=pick(m.get(u),usable)
             if r: exact.append(r)
     if exact:return max(exact,key=score)
 
@@ -100,7 +101,7 @@ def find(m,host,path,q):
         elif (pp.hostname or "").lower()!=(host or "").split(":",1)[0].lower():
             continue
         if _canon_path(pp.path)!=want: continue
-        r=pick(rs)
+        r=pick(rs,usable)
         if not r: continue
         # Query is a preference, not a requirement. Cache-bust recovery stored
         # the body under the original canonical URL.
@@ -123,13 +124,28 @@ def find(m,host,path,q):
         for u,rs in m.items():
             pp=urlparse(u)
             if _izzi_host(pp.hostname) and unquote(pp.path).endswith(suffix):
-                r=pick(rs)
+                r=pick(rs,usable)
                 if r: lessons.append((score(r),r,u))
         if lessons:
             lessons.sort(key=lambda x:x[0],reverse=True)
             print("[LESSON FALLBACK]",requested_path,"=>",lessons[0][2])
             return lessons[0][1]
     return None
+
+def usable_font(r):
+    if r.get("status",200)!=200:return False
+    f=ARCHIVE_DIR/r["key"]
+    try:
+        with f.open("rb") as stream:magic=stream.read(4)
+    except OSError:return False
+    return magic in (b"wOF2",b"wOFF",b"OTTO",b"\x00\x01\x00\x00",b"ttcf",b"true")
+
+def usable_image(r):
+    if r.get("status",200)!=200:return False
+    try:
+        with (ARCHIVE_DIR/r["key"]).open("rb") as stream:header=stream.read(1024)
+    except OSError:return False
+    return bool(header) and not re.search(br'<(?:!doctype\s+html|html)\b',header,re.I)
 
 def rewrite(b):
     # Called ONLY for already-decoded textual resources.
@@ -149,14 +165,63 @@ def rewrite(b):
            ("https:\\/\\/xapi.izzi.digital\\/","\\/__host__\\/xapi.izzi.digital\\/"),
            ("https://www.googletagmanager.com/gtm.js","/__offline__/gtag.js"))
     for a,c in pairs:t=t.replace(a,c)
+    # External YouTube playback is unavailable offline. Keep its API loader
+    # local without simulating player events or fetching third-party cookies.
+    t=re.sub(r'(?:(?:https?:)?//|https?:\\/\\/)(?:www\.)?youtube\.com(?:/|\\/)iframe_api\b',
+             '/__offline__/youtube-api.js',t,flags=re.I)
+    t=re.sub(r'(?:https?:)?//(?:www\.)?youtube\.com/s/player/[^"\'\s<>]+/www-widgetapi[^"\'\s<>]*\.js',
+             '/__offline__/youtube-api.js',t,flags=re.I)
+    t=re.sub(r'(?:https?:)?//(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)/embed/',
+             '/__offline__/external-media/',t,flags=re.I)
     return t.encode("utf-8")
+
+def bad_media_source(value):
+    value=(value or "").strip()
+    return not value or value=="#" or urlparse(value).path.lower().endswith(".html")
+
+class MediaPlaceholders(HTMLParser):
+    """Remove invalid static media sources before the browser sees the tags.
+
+    Preserve the document verbatim except for these attributes; the early
+    lesson-scoped shim supplies missing sources as elements are parsed.
+    """
+    def __init__(self,text):
+        super().__init__(convert_charrefs=False)
+        self.text=text;self.edits=[];self.depth=0
+        self.lines=[0]
+        self.lines.extend(m.end() for m in re.finditer('\n',text))
+    def handle_starttag(self,tag,attrs):
+        if tag in {"video","audio"}:self.depth+=1
+        if tag not in {"video","audio"} and not (tag=="source" and self.depth):return
+        attrs=dict(attrs)
+        if "src" not in attrs or not bad_media_source(attrs["src"]):return
+        raw=self.get_starttag_text()
+        attr_rx=re.compile(r'''\s+(?P<name>[^\s=/>]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?''')
+        cleaned=raw
+        for attr in attr_rx.finditer(raw):
+            if attr.group("name").lower()=="src":
+                cleaned=raw[:attr.start()]+raw[attr.end():]
+                break
+        line,col=self.getpos();start=self.lines[line-1]+col
+        self.edits.append((start,start+len(raw),cleaned))
+    def handle_endtag(self,tag):
+        if tag in {"video","audio"}:self.depth=max(0,self.depth-1)
+    def handle_startendtag(self,tag,attrs):
+        depth=self.depth
+        self.handle_starttag(tag,attrs)
+        self.depth=depth
+    def clean(self):
+        self.feed(self.text)
+        text=self.text
+        for start,end,replacement in reversed(self.edits):text=text[:start]+replacement+text[end:]
+        return text
 
 def inject_media_map(b,path):
     m=re.match(r"^/DOS/(\d+)/(\d+)\.html$",path)
     if not m:return b
     bid,lid=m.groups(); media=lesson_media(bid,lid)
-    if not media:return b
     t=b.decode("utf-8",errors="strict")
+    t=MediaPlaceholders(t).clean()
     # IZZI pages may contain fallback <source> tags whose declared type does not
     # match the .mp4 URL. Firefox rejects those before trying the resource.
     t=re.sub(r'(<source\b[^>]*\bsrc=["\'][^"\']+\.mp4(?:\?[^"\']*)?["\'][^>]*\btype=["\'])([^"\']+)(["\'])',
@@ -169,33 +234,56 @@ def inject_media_map(b,path):
         q=urlparse(u)
         if q.netloc=="bg.izzi.digital": local.append(q.path+(("?"+q.query) if q.query else ""))
         else: local.append("/__host__/"+q.netloc+q.path+(("?"+q.query) if q.query else ""))
-    payload=json.dumps({"book":bid,"lesson":lid,"media":local},ensure_ascii=False)
+    payload=json.dumps({"book":bid,"lesson":lid,"media":local,
+                       "blocks":[x.get("blocks",[]) for x in media]},ensure_ascii=False).replace("<","\\u003c")
     shim=r"""<script>
 window.__IZZI_OFFLINE_MEDIA__=PAYLOAD;
 (function(){
   const M=window.__IZZI_OFFLINE_MEDIA__.media||[];
-  function bad(v){return !v||v==="#"||v.endsWith(".html#")||v.endsWith(".html");}
+  const B=window.__IZZI_OFFLINE_MEDIA__.blocks||[];
+  function bad(v){
+    if(!v||!v.trim()||v.trim()==="#")return true;
+    try{return new URL(v,document.baseURI).pathname.toLowerCase().endsWith(".html");}catch(e){return true;}
+  }
   function fix(root){
+    if(document.readyState==="loading")return;
     const nodes=(root||document).querySelectorAll("video,audio");
     nodes.forEach((el,i)=>{
       let src=el.getAttribute("src")||"";
       let sources=[...el.querySelectorAll("source")];
       let valid=src&&!bad(src);
       if(!valid) valid=sources.some(x=>{let v=x.getAttribute("src")||"";return v&&!bad(v)});
-      if(!valid && M.length){
-        let u=M[Math.min(i,M.length-1)];
-        if(sources.length) sources[0].setAttribute("src",u); else el.setAttribute("src",u);
+      const audio=el.tagName==="AUDIO";
+      const candidates=M.map((url,index)=>({url,index})).filter(x=>{
+        const ext=new URL(x.url,document.baseURI).pathname.toLowerCase();
+        return audio?/\.(mp3|wav|ogg|m4a)$/.test(ext):!/\.(mp3|wav|ogg|m4a)$/.test(ext);
+      });
+      const block=el.closest('[data-id], [id^="block-"]');
+      const blockId=block&&(block.getAttribute("data-id")||(block.id||"").replace(/^block-/,""));
+      let selected=candidates.find(x=>(B[x.index]||[]).map(String).includes(blockId));
+      const sameKind=[...nodes].filter(x=>x.tagName===el.tagName);
+      if(!selected && !candidates.some(x=>(B[x.index]||[]).length))selected=candidates[sameKind.indexOf(el)];
+      if(!valid && selected){
+        let u=selected.url;
+        if(sources.length){
+          el.removeAttribute("src");
+          sources[0].setAttribute("src",u);
+          if(new URL(u,document.baseURI).pathname.toLowerCase().endsWith(".mp4"))sources[0].setAttribute("type","video/mp4");
+          sources.slice(1).forEach(x=>{if(bad(x.getAttribute("src")))x.removeAttribute("src");});
+        }else el.setAttribute("src",u);
         try{el.load()}catch(e){}
         console.log("[IZZI OFFLINE MEDIA MAP]",i,u);
       }
     });
   }
   document.addEventListener("DOMContentLoaded",()=>{fix(document);setTimeout(()=>fix(document),500);setTimeout(()=>fix(document),2000)});
-  new MutationObserver(()=>fix(document)).observe(document.documentElement,{subtree:true,childList:true});
+  new MutationObserver(()=>fix(document)).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:["src"]});
 })();
 </script>""".replace("PAYLOAD",payload)
-    pos=t.lower().rfind("</body>")
-    t=t[:pos]+shim+t[pos:] if pos>=0 else t+shim
+    # Observe parsing from the head, before media elements can try placeholder URLs.
+    head=re.search(r'<head\b[^>]*>',t,re.I)
+    pos=head.end() if head else 0
+    t=t[:pos]+shim+t[pos:]
     return t.encode("utf-8")
 
 def parse_range(value,total):
@@ -261,19 +349,29 @@ class H(BaseHTTPRequestHandler):
         # v3.4.2: complete assembled MP4 takes precedence over captured 206 chunks.
         if Path(unquote(path)).suffix.lower()==".mp4":
             full=("https://"+host+path)+(("?"+q) if q else "")
-            ar=resolve_assembled(full)
+            ar,match_kind=resolve_assembled(full)
             if not ar and _izzi_host(host):
                 # Captured HTML can request /DOS/<book>/datastore/... while the
                 # original media URL was /datastore/....
                 cp=_canon_path(path)
                 full2=("https://bg.izzi.digital"+cp)+(("?"+q) if q else "")
-                ar=resolve_assembled(full2)
+                ar,match_kind=resolve_assembled(full2)
             if ar:
-                af=Path(ar["path"]) if isinstance(ar,dict) and ar.get("path") else Path(ar)
-                if af.exists():
-                    print("[ASSEMBLED MEDIA REPLAY]",path)
+                af=ARCHIVE_DIR/ar["record"]["key"]
+                if af.is_file():
+                    print("[ASSEMBLED MEDIA REPLAY]",path,match_kind)
                     return self.sendfile(af,"video/mp4")
-        r=find(m,host,path,q)
+        ext=Path(unquote(path)).suffix.lower()
+        usable=usable_font if ext in FONT_EXT else (usable_image if ext in IMAGE_EXT else None)
+        r=find(m,host,path,q,usable)
+        # Retain real upstream errors when there is no usable body alternative.
+        if not r and usable:
+            error=find(m,host,path,q)
+            if error and int(error.get("status",200))>=400:
+                f=ARCHIVE_DIR/error["key"]
+                if f.is_file():
+                    print("[UPSTREAM ERROR]",error["status"],path)
+                    return self.sendb(f.read_bytes(),error.get("content_type") or "text/plain",error["status"])
         if not r:
             print("[MISS]",host,path,q);STATE_DIR.mkdir(parents=True,exist_ok=True)
             with missing_log().open("a",encoding="utf-8") as o:
@@ -322,6 +420,10 @@ class H(BaseHTTPRequestHandler):
             return self.sendb(('<!doctype html><meta charset="utf-8"><h1>%s</h1><p><a href="/">← Библиотека</a></p><ol>%s</ol>'%(html.escape(b["title"]),items)).encode(),"text/html; charset=utf-8")
         if p.path=="/__offline__/gtag.js":
             return self.sendb(b"window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){window.dataLayer.push(arguments);};","application/javascript")
+        if p.path=="/__offline__/youtube-api.js":
+            return self.sendb(b'/* YouTube player API is unavailable in offline replay. */',"application/javascript")
+        if p.path.startswith("/__offline__/external-media/"):
+            return self.sendb('<!doctype html><meta charset="utf-8"><p>Външното видео не е включено в офлайн архива.</p>'.encode(),"text/html; charset=utf-8")
         if p.path=="/__missing__":
             events=[];seen=set();f=missing_log()
             if f.exists():
