@@ -3,16 +3,9 @@ from pathlib import Path
 from urllib.parse import urlparse,unquote
 from config import *
 from import_har import load as load_json
+from replay_resolver import _canon_path as canon
 
 m=load_json(URL_MAP_FILE,{})
-def canon(path):
-    path=unquote(path)
-    x=re.match(r"^/DOS/(\d+)/(.*)$",path)
-    if x:
-        tail="/"+x.group(2)
-        if tail.startswith(("/datastore/","/profil/","/_nuxt/")):return tail
-    return path
-
 lesson=[]; fonts=[]; mp4=[]
 for u,rs in m.items():
     p=urlparse(u); path=unquote(p.path)

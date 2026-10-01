@@ -6,6 +6,7 @@ from urllib.parse import quote,unquote,urlparse
 from config import *
 from media_mapping import lesson_media
 from assembled_media import resolve as resolve_assembled
+import progress_journal
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
 DOC_EXT={".pdf",".doc",".docx",".xls",".xlsx",".ppt",".pptx",".zip",".rar",".7z",".txt",".rtf",".odt",".ods",".odp",".epub"}
@@ -32,120 +33,13 @@ def load(p,d):
     try:return json.loads(Path(p).read_text(encoding="utf-8"))
     except:return d
 
-def score(r):
-    if not r or not r.get("body_available") or not r.get("key"): return -10000
-    s=0
-    if r.get("method","GET")=="GET": s+=100
-    if r.get("complete"): s+=1000
-    if r.get("status")==200: s+=300
-    elif r.get("status")==206: s-=300
-    if r.get("decoded"): s+=200
-    if r.get("source")=="capture_proxy_v3.2": s+=100
-    return s
-
-def pick(rs,usable=None):
-    good=[r for r in (rs or []) if score(r)>-10000 and (usable is None or usable(r))]
-    return max(enumerate(good),key=lambda x:(score(x[1]),x[0]))[1] if good else None
-
-def logical_path(path):
-    """Normalize IZZI's two equivalent resource forms:
-       /DOS/<book>/datastore/... <-> /datastore/...
-       /DOS/<book>/profil/...    <-> /profil/...
-       Lesson HTML keeps its /DOS/<book>/<lesson>.html identity.
-    """
-    mm=re.match(r"^/DOS/(\d+)/(.*)$",path)
-    if not mm:return path
-    tail="/"+mm.group(2)
-    if tail.startswith(("/datastore/","/profil/","/_nuxt/")):
-        return tail
-    return path
-
-def _izzi_host(h):
-    h=(h or "").split(":",1)[0].lower()
-    return h=="izzi.digital" or h.endswith(".izzi.digital")
-
-def _canon_path(path):
-    path=unquote(path or "/")
-    mm=re.match(r"^/DOS/(\d+)/(.*)$",path)
-    if mm:
-        tail="/"+mm.group(2)
-        if tail.startswith(("/datastore/","/profil/","/_nuxt/")):
-            return tail
-    return path
-
-def find(m,host,path,q,usable=None):
-    """Resolve from the URL map itself.
-
-    Exact URL is preferred. For IZZI resources we then compare canonical paths
-    using parsed hostname (not netloc), so :443 / captured-host variations do
-    not make an otherwise valid archived body unreachable.
-    """
-    requested_path=unquote(path)
-    exact=[]
-    for scheme in ("https","http"):
-        for h in (host, host.split(":",1)[0]):
-            u=f"{scheme}://{h}{requested_path}"+(("?"+q) if q else "")
-            r=pick(m.get(u),usable)
-            if r: exact.append(r)
-    if exact:return max(exact,key=score)
-
-    want=_canon_path(requested_path)
-    hits=[]
-    for u,rs in m.items():
-        try: pp=urlparse(u)
-        except: continue
-        # Never alias arbitrary external hosts. For the local bg.izzi.digital
-        # route, any archived *.izzi.digital source is eligible.
-        if _izzi_host(host):
-            if not _izzi_host(pp.hostname): continue
-        elif (pp.hostname or "").lower()!=(host or "").split(":",1)[0].lower():
-            continue
-        if _canon_path(pp.path)!=want: continue
-        r=pick(rs,usable)
-        if not r: continue
-        # Query is a preference, not a requirement. Cache-bust recovery stored
-        # the body under the original canonical URL.
-        qbonus=3 if pp.query==q else (2 if not q else 1)
-        # Prefer the original bg host if several IZZI hosts share a path.
-        hbonus=1 if (pp.hostname or "").lower()=="bg.izzi.digital" else 0
-        hits.append((qbonus,hbonus,score(r),r,u))
-    if hits:
-        hits.sort(key=lambda x:x[:3],reverse=True)
-        chosen=hits[0]
-        if urlparse(chosen[4]).path!=requested_path:
-            print("[CANONICAL REPLAY]",requested_path,"=>",urlparse(chosen[4]).path)
-        return chosen[3]
-
-    # Last-resort lesson lookup by exact book+lesson suffix, still only on IZZI.
-    lm=re.match(r"^/DOS/(\d+)/(\d+)\.html$",requested_path)
-    if lm and _izzi_host(host):
-        suffix=f"/DOS/{lm.group(1)}/{lm.group(2)}.html"
-        lessons=[]
-        for u,rs in m.items():
-            pp=urlparse(u)
-            if _izzi_host(pp.hostname) and unquote(pp.path).endswith(suffix):
-                r=pick(rs,usable)
-                if r: lessons.append((score(r),r,u))
-        if lessons:
-            lessons.sort(key=lambda x:x[0],reverse=True)
-            print("[LESSON FALLBACK]",requested_path,"=>",lessons[0][2])
-            return lessons[0][1]
-    return None
+from replay_resolver import (score,pick,logical_path,_izzi_host,_canon_path,find,book_ids,compatible_books,usable_body)
 
 def usable_font(r):
-    if r.get("status",200)!=200:return False
-    f=ARCHIVE_DIR/r["key"]
-    try:
-        with f.open("rb") as stream:magic=stream.read(4)
-    except OSError:return False
-    return magic in (b"wOF2",b"wOFF",b"OTTO",b"\x00\x01\x00\x00",b"ttcf",b"true")
+    return usable_body(r,ARCHIVE_DIR,'.woff2')
 
 def usable_image(r):
-    if r.get("status",200)!=200:return False
-    try:
-        with (ARCHIVE_DIR/r["key"]).open("rb") as stream:header=stream.read(1024)
-    except OSError:return False
-    return bool(header) and not re.search(br'<(?:!doctype\s+html|html)\b',header,re.I)
+    return usable_body(r,ARCHIVE_DIR,'.png')
 
 def rewrite(b):
     # Called ONLY for already-decoded textual resources.
@@ -346,6 +240,10 @@ class H(BaseHTTPRequestHandler):
         if self.command!="HEAD":self.wfile.write(f.read_bytes())
 
     def archive(self,m,host,path,q):
+        context=book_ids(urlparse(self.headers.get("Referer","")).path)
+        # Explicit book URLs remain navigable from another book's page.
+        # Referer scope is only needed for paths that carry no book identity.
+        book=next(iter(context)) if len(context)==1 and not book_ids(path) else None
         # v3.4.2: complete assembled MP4 takes precedence over captured 206 chunks.
         if Path(unquote(path)).suffix.lower()==".mp4":
             full=("https://"+host+path)+(("?"+q) if q else "")
@@ -356,17 +254,19 @@ class H(BaseHTTPRequestHandler):
                 cp=_canon_path(path)
                 full2=("https://bg.izzi.digital"+cp)+(("?"+q) if q else "")
                 ar,match_kind=resolve_assembled(full2)
-            if ar:
+            if ar and compatible_books(path,urlparse(ar["url"]).path,book):
                 af=ARCHIVE_DIR/ar["record"]["key"]
                 if af.is_file():
                     print("[ASSEMBLED MEDIA REPLAY]",path,match_kind)
                     return self.sendfile(af,"video/mp4")
         ext=Path(unquote(path)).suffix.lower()
-        usable=usable_font if ext in FONT_EXT else (usable_image if ext in IMAGE_EXT else None)
-        r=find(m,host,path,q,usable)
+        usable=lambda r:usable_body(r,ARCHIVE_DIR,ext)
+        r=find(m,host,path,q,usable,book)
         # Retain real upstream errors when there is no usable body alternative.
         if not r and usable:
-            error=find(m,host,path,q)
+            error=find(m,host,path,q,None,book)
+            if error and error.get('status')==206 and not error.get('complete') and ext in MEDIA_EXT:
+                return self.sendb(b"Incomplete captured media range","text/plain; charset=utf-8",409)
             if error and int(error.get("status",200))>=400:
                 f=ARCHIVE_DIR/error["key"]
                 if f.is_file():
@@ -422,6 +322,8 @@ class H(BaseHTTPRequestHandler):
             return self.sendb(b"window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){window.dataLayer.push(arguments);};","application/javascript")
         if p.path=="/__offline__/youtube-api.js":
             return self.sendb(b'/* YouTube player API is unavailable in offline replay. */',"application/javascript")
+        if p.path=="/__offline__/progress":
+            return self.sendb(json.dumps(progress_journal.summarize(PROGRESS_DIR),ensure_ascii=False).encode(),"application/json")
         if p.path.startswith("/__offline__/external-media/"):
             return self.sendb('<!doctype html><meta charset="utf-8"><p>Външното видео не е включено в офлайн архива.</p>'.encode(),"text/html; charset=utf-8")
         if p.path=="/__missing__":
@@ -443,12 +345,29 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):self.route()
     def do_HEAD(self):self.route()
     def progress(self):
-        n=int(self.headers.get("Content-Length","0") or 0);raw=self.rfile.read(n) if n else b"";ref=self.headers.get("Referer","")
-        mm=re.search(r"/DOS/(\d+)/",ref+" "+self.path);bid=mm.group(1) if mm else "general"
-        PROGRESS_DIR.mkdir(parents=True,exist_ok=True);f=PROGRESS_DIR/(bid+".jsonl")
-        e={"time":time.strftime("%Y-%m-%d %H:%M:%S"),"method":self.command,"path":self.path,"referer":ref,"body":raw.decode("utf-8",errors="replace")[:100000]}
-        with f.open("a",encoding="utf-8") as o:o.write(json.dumps(e,ensure_ascii=False)+"\n")
-        print("[PROGRESS]",bid,self.command,self.path);self.sendb(b'{"offline":true,"saved":true}',"application/json",200)
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection=True
+            return self.sendb(b'{"saved":false,"error":"transfer_encoding_unsupported"}',"application/json",501)
+        try:n=int(self.headers.get("Content-Length","0") or 0)
+        except ValueError:
+            self.close_connection=True
+            return self.sendb(b'{"saved":false,"error":"invalid_length"}',"application/json",400)
+        if n<0 or n>progress_journal.MAX_WRITE:
+            self.close_connection=True
+            return self.sendb(b'{"saved":false,"error":"invalid_length"}',"application/json",413 if n>0 else 400)
+        self.connection.settimeout(15)
+        try:raw=self.rfile.read(n) if n else b""
+        except TimeoutError:
+            self.close_connection=True
+            return self.sendb(b'{"saved":false,"error":"body_timeout"}',"application/json",408)
+        if len(raw)!=n:
+            return self.sendb(b'{"saved":false,"error":"incomplete_body"}',"application/json",400)
+        try:
+            bid=progress_journal.append(PROGRESS_DIR,self.command,self.path,self.headers.get("Referer",""),raw,self.headers.get("Content-Type",""))
+        except OSError:
+            return self.sendb(b'{"saved":false,"error":"journal_write_failed"}',"application/json",500)
+        print("[PROGRESS]",bid,self.command,urlparse(self.path).path)
+        self.sendb(b'{"offline":true,"saved":true}',"application/json",200)
     def do_POST(self):self.progress()
     def do_PUT(self):self.progress()
     def do_PATCH(self):self.progress()

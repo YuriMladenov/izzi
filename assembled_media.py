@@ -2,12 +2,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 from config import ARCHIVE_DIR, URL_MAP_FILE, SOURCE_HOST
 from import_har import load
+from replay_resolver import usable_body
 
 def _valid(r):
     if not (r.get("complete") and r.get("body_available") and r.get("key")):
         return False
-    f=ARCHIVE_DIR/r["key"]
-    return f.exists() and f.is_file() and f.stat().st_size>0
+    return usable_body(r,ARCHIVE_DIR,'.mp4') and (ARCHIVE_DIR/r['key']).stat().st_size>0
 
 def build_index():
     m=load(URL_MAP_FILE,{})
@@ -19,7 +19,7 @@ def build_index():
         for r in rs:
             if not _valid(r): continue
             # assembled_ranges is preferred, but any explicitly complete body is acceptable.
-            score=(100 if r.get("source")=="assembled_ranges" else 0)+int(r.get("size") or 0)
+            score=(int(r.get("source")=="assembled_ranges"),int(r.get("size") or 0))
             item={"url":u,"record":r,"score":score}
             if u not in exact or score>exact[u]["score"]: exact[u]=item
             k=(pu.netloc.lower(),pu.path)

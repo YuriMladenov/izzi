@@ -2,6 +2,7 @@ import json,re
 from urllib.parse import urlparse
 from config import STATE_DIR
 from active_lesson import get_active
+from replay_resolver import book_ids
 
 P=STATE_DIR/"media_map.json"
 LESSON_RX=re.compile(r"/DOS/(\d+)/(\d+)\.html(?:$|[?#])")
@@ -32,6 +33,7 @@ def add_media(url,referer,request_headers=None):
     if not lesson:
         return False
     book,lid=lesson
+    if book_ids(urlparse(url).path)-{str(book)}:return False
     x=load(); lessons=x.setdefault("lessons",{})
     key=f"{book}/{lid}"
     e=lessons.setdefault(key,{"book":book,"lesson":lid,"media":[]})
@@ -52,4 +54,5 @@ def lesson_media(book,lid):
     """Return strict media record dictionaries for one exact lesson."""
     e=load().get("lessons",{}).get(f"{book}/{lid}",{})
     return [i for i in e.get("media",[])
-            if isinstance(i,dict) and i.get("url") and i.get("strict")]
+            if isinstance(i,dict) and i.get("url") and i.get("strict")
+            and not (book_ids(urlparse(i["url"]).path)-{str(book)})]
