@@ -14,13 +14,24 @@ def score(r):
     if r.get("source")=="capture_proxy_v3.2": s+=100
     return s
 
+def complete_range(r,size=None):
+    """A single 206 body is complete only when it proves exact full coverage."""
+    cr=re.fullmatch(r'bytes\s+(\d+)-(\d+)/(\d+)',str(r.get('content_range','')).strip(),re.I)
+    if not cr:return False
+    start,end,total=map(int,cr.groups())
+    if size is None:size=r.get('size')
+    return total>0 and start==0 and end==total-1 and size==total
+
+def complete_body(r,size=None):
+    return bool(r.get('complete') or r.get('source')=='assembled_ranges' or complete_range(r,size))
+
 def usable_body(r,archive,ext=''):
     if not isinstance(r,dict) or not r.get('body_available') or not isinstance(r.get('key'),str) or not r['key']:return False
     blob=Path(archive)/r['key']
     if not blob.is_file():return False
     if r.get('status',200) not in (200,206):return False
     if r.get('size') is not None and blob.stat().st_size!=r['size']:return False
-    if r.get('status')==206 and not (r.get('complete') or r.get('source')=='assembled_ranges'):return False
+    if r.get('status')==206 and not complete_body(r,blob.stat().st_size):return False
     if ext in {'.woff','.woff2','.ttf','.otf'}:
         with blob.open('rb') as stream:magic=stream.read(4)
         if magic not in (b'wOF2',b'wOFF',b'OTTO',b'\x00\x01\x00\x00',b'ttcf',b'true'):return False

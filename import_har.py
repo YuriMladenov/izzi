@@ -1,4 +1,4 @@
-import base64,hashlib,html,json,mimetypes,re,sys,time
+import base64,hashlib,html,json,mimetypes,re,sys,time,os,tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 from config import *
@@ -6,9 +6,19 @@ RX=re.compile(r"^/DOS/(\d+)/(\d+)\.html$")
 SENSITIVE={"authorization","proxy-authorization","cookie","set-cookie","x-api-key","x-auth-token","x-csrf-token","x-xsrf-token"}
 def load(p,d):
     try:return json.loads(Path(p).read_text(encoding="utf-8"))
-    except:return d
+    except FileNotFoundError:return d
 def save(p,o):
-    Path(p).parent.mkdir(parents=True,exist_ok=True);Path(p).write_text(json.dumps(o,ensure_ascii=False,indent=2),encoding="utf-8")
+    p=Path(p);p.parent.mkdir(parents=True,exist_ok=True)
+    # Readers see either the old complete JSON or the new complete JSON.
+    # Never truncate the live URL map while replay is reading it.
+    fd,tmp=tempfile.mkstemp(prefix='.'+p.name+'-',suffix='.tmp',dir=p.parent)
+    try:
+        with os.fdopen(fd,'w',encoding='utf-8') as stream:
+            json.dump(o,stream,ensure_ascii=False,indent=2)
+            stream.flush();os.fsync(stream.fileno())
+        os.replace(tmp,p)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 def body(c):
     if c.get("text") is None:return None
     try:return base64.b64decode(c["text"]) if c.get("encoding")=="base64" else c["text"].encode()

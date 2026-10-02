@@ -7,6 +7,7 @@ from config import *
 from media_mapping import lesson_media
 from assembled_media import resolve as resolve_assembled
 import progress_journal
+from import_har import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
 DOC_EXT={".pdf",".doc",".docx",".xls",".xlsx",".ppt",".pptx",".zip",".rar",".7z",".txt",".rtf",".odt",".ods",".odp",".epub"}
@@ -33,7 +34,7 @@ def load(p,d):
     try:return json.loads(Path(p).read_text(encoding="utf-8"))
     except:return d
 
-from replay_resolver import (score,pick,logical_path,_izzi_host,_canon_path,find,book_ids,compatible_books,usable_body)
+from replay_resolver import (score,pick,logical_path,_izzi_host,_canon_path,find,book_ids,compatible_books,usable_body,complete_body)
 
 def usable_font(r):
     return usable_body(r,ARCHIVE_DIR,'.woff2')
@@ -196,15 +197,39 @@ def parse_range(value,total):
 def resource_stats(mapping,book_id=None):
     st={"documents":0,"media":0,"images":0,"fonts":0}
     for u,rs in mapping.items():
-        pp=urlparse(u);r=pick(rs)
+        pp=urlparse(u);ext=Path(pp.path).suffix.lower()
+        r=pick(rs,lambda row:usable_body(row,ARCHIVE_DIR,ext))
         if not r:continue
-        ext=Path(pp.path).suffix.lower()
-        if book_id and f"/publication/{book_id}/" not in pp.path and f"/DOS/{book_id}/" not in pp.path and ext not in FONT_EXT:continue
+        if book_id and str(book_id) not in book_ids(pp.path):continue
         if ext in DOC_EXT:st["documents"]+=1
         elif ext in MEDIA_EXT:st["media"]+=1
         elif ext in IMAGE_EXT:st["images"]+=1
         elif ext in FONT_EXT:st["fonts"]+=1
     return st
+
+def page_counts(mapping,book_id,book):
+    pages=book.get('lessons',{})
+    available=sum(find(mapping,SOURCE_HOST,p.get('path') or f'/DOS/{book_id}/{lid}.html','',
+                  lambda row:usable_body(row,ARCHIVE_DIR,'.html')) is not None
+                  for lid,p in pages.items())
+    return len(pages),available
+
+def current_missing(events,mapping):
+    missing=[];warnings=[];resolved=0;seen=set()
+    for event in events:
+        host=event.get('host',SOURCE_HOST);path=event.get('path','/');query=event.get('query','')
+        key=(host,tuple(sorted(book_ids(path))),_canon_path(path))
+        if key in seen:continue
+        seen.add(key);ext=Path(path).suffix.lower()
+        row=find(mapping,host,path,query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
+        if row:resolved+=1;continue
+        old=find(mapping,host,path,query)
+        category='UPSTREAM 404 WARNING' if old and old.get('status')==404 else (
+            'OPTIONAL' if ext=='.map' or path in ('/favicon.ico','/datastore/favicon.ico') else 'MISSING')
+        item=(category,host+path)
+        if category=='MISSING':missing.append(item)
+        else:warnings.append(item)
+    return missing,warnings,resolved
 
 def progress_summary(book_id):
     f=PROGRESS_DIR/(str(book_id)+".jsonl")
@@ -265,7 +290,7 @@ class H(BaseHTTPRequestHandler):
         # Retain real upstream errors when there is no usable body alternative.
         if not r and usable:
             error=find(m,host,path,q,None,book)
-            if error and error.get('status')==206 and not error.get('complete') and ext in MEDIA_EXT:
+            if error and error.get('status')==206 and not complete_body(error) and ext in MEDIA_EXT:
                 return self.sendb(b"Incomplete captured media range","text/plain; charset=utf-8",409)
             if error and int(error.get("status",200))>=400:
                 f=ARCHIVE_DIR/error["key"]
@@ -284,7 +309,7 @@ class H(BaseHTTPRequestHandler):
         print("[REPLAY]",r.get("status"),r.get("source","?"),"decoded="+str(r.get("decoded")),r["key"],path)
         if ext in MEDIA_EXT or mime.startswith(("video/","audio/")):
             # Never replay an incomplete captured 206 chunk as if it were a complete file.
-            if r.get("status")==206 and not r.get("complete"):
+            if r.get("status")==206 and not complete_body(r,f.stat().st_size):
                 print("[MEDIA INCOMPLETE]",path,r.get("content_range"))
                 return self.sendb(b"Incomplete captured media range","text/plain; charset=utf-8",409)
             if ext==".mp4" and not mime.startswith("video/"):
@@ -303,21 +328,28 @@ class H(BaseHTTPRequestHandler):
         return self.sendb(b,ct)
 
     def route(self):
-        p=urlparse(self.path);m=load(URL_MAP_FILE,{});books=load(BOOKS_FILE,{})
+        p=urlparse(self.path)
+        try:
+            m=load_archive_state(URL_MAP_FILE,{});books=load_archive_state(BOOKS_FILE,{})
+            if not isinstance(m,dict) or not isinstance(books,dict):raise ValueError('invalid state root')
+        except (OSError,ValueError) as error:
+            print('[STATE ERROR]',type(error).__name__)
+            return self.sendb(b'Archive state unavailable. Stop capture and run lesson_diagnostic.bat.','text/plain; charset=utf-8',503)
         if p.path=="/":
             items=[]
             for bid,b in sorted(books.items()):
-                st=resource_stats(m,bid);pr=progress_summary(bid)
-                info='%d урока · %d документа · %d медия · %d изображения · %d progress'%(len(b.get("lessons",{})),st["documents"],st["media"],st["images"],pr)
+                st=resource_stats(m,bid);pr=progress_summary(bid);known,available=page_counts(m,bid,b)
+                info='%d известни страници · %d с наличен HTML · %d документа · %d медия · %d изображения · %d локални записи'%(known,available,st["documents"],st["media"],st["images"],pr)
                 items.append('<li><a href="/__book__/%s"><b>%s</b></a><br><small>ID %s · %s</small></li>'%(bid,html.escape(b.get("title","Учебник "+bid)),bid,html.escape(info)))
-            page='<!doctype html><meta charset="utf-8"><title>IZZI Offline Library</title><h1>IZZI Offline Library v3.3.1</h1><p><a href="/__missing__">Липсващи ресурси</a></p><ul>'+''.join(items)+'</ul>'
+            page='<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><title>IZZI Offline Library</title><h1>IZZI Offline Library</h1><p><a href="/__missing__">Текущи липсващи ресурси</a></p><p>Книгите се различават по ID; еднаквите заглавия не се сливат.</p><ul>'+''.join(items)+'</ul>'
             return self.sendb(page.encode(),"text/html; charset=utf-8")
         if p.path.startswith("/__book__/"):
             bid=p.path.split("/")[-1];b=books.get(bid)
             if not b:return self.sendb(b"Unknown book","text/plain",404)
             ls=sorted(b.get("lessons",{}).values(),key=lambda x:int(x["id"]))
             items=''.join('<li><a href="%s">%s</a> <small>(%s)</small></li>'%(html.escape(x["path"]),html.escape(x["title"]),x["id"]) for x in ls)
-            return self.sendb(('<!doctype html><meta charset="utf-8"><h1>%s</h1><p><a href="/">← Библиотека</a></p><ol>%s</ol>'%(html.escape(b["title"]),items)).encode(),"text/html; charset=utf-8")
+            known,available=page_counts(m,bid,b)
+            return self.sendb(('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a></p><ol>%s</ol>'%(html.escape(b["title"]),html.escape(bid),known,available,items)).encode(),"text/html; charset=utf-8")
         if p.path=="/__offline__/gtag.js":
             return self.sendb(b"window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){window.dataLayer.push(arguments);};","application/javascript")
         if p.path=="/__offline__/youtube-api.js":
@@ -334,8 +366,10 @@ class H(BaseHTTPRequestHandler):
                     except:continue
                     k=(e.get("host"),e.get("path"),e.get("query"))
                     if k not in seen:seen.add(k);events.append(e)
-            rows=''.join('<li><code>%s%s</code></li>'%(html.escape(e.get("host","")+e.get("path","")),html.escape(("?"+e.get("query","")) if e.get("query") else "")) for e in events[-500:])
-            return self.sendb(('<!doctype html><meta charset="utf-8"><h1>Липсващи ресурси (%d)</h1><ul>%s</ul>'%(len(events),rows)).encode(),"text/html; charset=utf-8")
+            missing,warnings,resolved=current_missing(events,m)
+            def rows(items):return ''.join('<li>%s <code>%s</code></li>'%(label,html.escape(url)) for label,url in items)
+            page='<!doctype html><meta charset="utf-8"><h1>Текущи липсващи ресурси (%d)</h1><p>Възстановени от историческия лог: %d. Логът е запазен.</p><ul>%s</ul><h2>Предупреждения (%d)</h2><ul>%s</ul>'%(len(missing),resolved,rows(missing),len(warnings),rows(warnings))
+            return self.sendb(page.encode(),"text/html; charset=utf-8")
         if p.path.startswith("/__host__/"):
             rest=p.path[len("/__host__/"):]
             if "/" not in rest:return self.sendb(b"Bad route","text/plain",400)

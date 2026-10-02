@@ -20,6 +20,7 @@ import server
 import assembled_media
 import media_mapping
 import progress_journal
+import import_har
 
 class LibraryWorkflow(unittest.TestCase):
     def setUp(self):
@@ -115,6 +116,69 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertTrue(report['books'][0]['missing_lessons'])
     def test_empty_archive_has_no_ready_result(self):
         self.assertEqual([],readiness.assess(self.root)['books'])
+    def test_full_single206_html_replays_but_partial_or_wrong_size_does_not(self):
+        self.completed(1)
+        path='/DOS/1/0.html';url='https://bg.izzi.digital'+path
+        body=b'<html>verified full range</html>'
+        self.mapping.pop(url)
+        self.add(path,body,status=206,content_range=f'bytes 0-{len(body)-1}/{len(body)}')
+        self.assertEqual('READY',self.report()['label'])
+        self.start_server()
+        status,headers,got=self.request(path)
+        self.assertEqual(200,status);self.assertIn(b'verified full range',got)
+        record=self.mapping[url][0]
+        record['content_range']=f'bytes 0-{len(body)-1}/{len(body)+1}'
+        self.write('url_map.json',self.mapping)
+        self.assertEqual(404,self.request(path)[0]);self.assertEqual('INCOMPLETE',self.report()['label'])
+        record['content_range']=f'bytes 0-{len(body)-1}/{len(body)}'
+        record['size']=len(body)+1;self.write('url_map.json',self.mapping)
+        self.assertEqual(404,self.request(path)[0])
+    def test_full_single206_mp4_supports_range_without_assembly_flag(self):
+        video=bytes(range(256))*8
+        self.add('/datastore/full.mp4',video,status=206,content_type='video/mp4',
+                 content_range='bytes 0-2047/2048')
+        self.start_server()
+        status,headers,body=self.request('/datastore/full.mp4',headers={'Range':'bytes=0-1023'})
+        self.assertEqual(206,status);self.assertEqual('bytes 0-1023/2048',headers['Content-Range'])
+        self.assertEqual(video[:1024],body)
+    def test_atomic_json_save_keeps_previous_map_if_replacement_fails(self):
+        path=self.state/'url_map.json'
+        import_har.save(path,{'old':[]})
+        with patch.object(import_har.os,'replace',side_effect=OSError('replace failed')):
+            with self.assertRaises(OSError):import_har.save(path,{'new':[]})
+        self.assertEqual({'old':[]},import_har.load(path,{}))
+        self.assertEqual([],list(self.state.glob('*.tmp')))
+        import_har.save(path,{'new':[]})
+        self.assertEqual({'new':[]},import_har.load(path,{}))
+        path.write_text('{broken')
+        with self.assertRaises(ValueError):import_har.load(path,{})
+    def test_bad_urlmap_returns503_instead_of_mass_false_misses(self):
+        (self.state/'url_map.json').write_text('{broken')
+        self.start_server()
+        self.assertEqual(503,self.request('/DOS/1/0.html')[0])
+        self.assertFalse((self.state/'missing_resources.jsonl').exists())
+    def test_current_missing_excludes_recovered_and_separates_warnings(self):
+        self.add('/DOS/1/restored.png',b'\x89PNGfixture',content_type='image/png')
+        self.add('/DOS/1/upstream.png',b'<html>404</html>',status=404,content_type='text/html')
+        events=[{'host':'bg.izzi.digital','path':p,'query':''} for p in
+                ['/DOS/1/restored.png','/DOS/1/upstream.png','/DOS/1/missing.png','/favicon.ico','/DOS/1/style.css.map']]
+        missing,warnings,resolved=server.current_missing(events,self.mapping)
+        self.assertEqual(1,resolved);self.assertEqual(1,len(missing));self.assertEqual(3,len(warnings))
+        self.assertIn('missing.png',missing[0][1])
+        self.start_server()
+        (self.state/'missing_resources.jsonl').write_text(''.join(json.dumps(e)+'\n' for e in events))
+        text=self.request('/__missing__')[2].decode()
+        self.assertNotIn('restored.png',text);self.assertIn('UPSTREAM 404 WARNING',text)
+        self.assertEqual(5,len((self.state/'missing_resources.jsonl').read_text().splitlines()))
+    def test_equal_book_titles_stay_separate_and_page_counts_use_bodies(self):
+        self.write('books.json',{'1':{'title':'Same title','lessons':{'10':{'id':'10','path':'/DOS/1/10.html','title':'Page'}}},
+            '2':{'title':'Same title','lessons':{'20':{'id':'20','path':'/DOS/2/20.html','title':'Page'}}}})
+        self.add('/DOS/1/10.html')
+        self.start_server();text=self.request('/')[2].decode()
+        self.assertEqual(2,text.count('<b>Same title</b>'))
+        self.assertIn('ID 1',text);self.assertIn('ID 2',text)
+        self.assertIn('1 с наличен HTML',text);self.assertIn('0 с наличен HTML',text)
+        self.assertIn('data:,',text)
     def test_two_books_private_aliases_and_unscoped_ambiguity(self):
         self.add('/DOS/1/profil/app.js',b'book one',content_type='application/javascript')
         self.add('/DOS/2/profil/app.js',b'book two',content_type='application/javascript')
