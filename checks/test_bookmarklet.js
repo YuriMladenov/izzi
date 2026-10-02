@@ -6,7 +6,7 @@ class Element{
  setAttribute(k,v){this.attrs[k]=v;}
  getAttribute(k){return this.attrs[k]||null;}
  addEventListener(k,f){this.listeners[k]=f;}
- attachShadow(){return this.shadow=new Element('shadow');}
+ attachShadow(){if(this.tag!=='div')throw new Error('NotSupportedError: unsupported shadow host');return this.shadow=new Element('shadow');}
  remove(){this.removed=true;}
  querySelector(){return null;}
  showModal(){this.shown=true;}
@@ -17,7 +17,7 @@ async function run(cancel){
  const body=new Element('body'),events=[],alerts=[];
  const link=(id,name)=>Object.assign(new Element('a'),{href:'https://bg.izzi.digital/DOS/1/'+id+'.html',innerText:name});
  const links=[link('8',''),link('2','Втори урок <b>'),link('8','Първи урок'),Object.assign(link('9','Чужд'),{href:'https://bg.izzi.digital/DOS/9/9.html'})];
- const doc={body,createElement:t=>new Element(t),querySelectorAll:()=>links,getElementById:()=>null};
+ const doc={body,createElement:t=>new Element(t),querySelectorAll:()=>links,getElementById:id=>body.children.find(x=>x.id===id&&!x.removed)||null};
  const task=vm.runInNewContext(source,{document:doc,location:new URL('https://bg.izzi.digital/DOS/1/index.html'),URL,URLSearchParams,Map,Set,alert:x=>alerts.push(x),fetch:async u=>{events.push(new URL(u).searchParams);},setInterval:()=>1,clearInterval:()=>{},setTimeout:f=>{f();return 1;}});
  const dialog=body.children[0];assert.equal(dialog.shown,true);
  const nodes=all(dialog),inputs=nodes.filter(x=>x.tag==='input'),button=t=>nodes.find(x=>x.tag==='button'&&x.textContent===t);
@@ -30,4 +30,4 @@ async function run(cancel){
  assert.deepEqual(events.filter(x=>x.get('kind')==='lesson-start').map(x=>x.get('lesson')),['8']);
  assert.equal(dialog.removed,true);assert.equal(alerts.length,1);
 }
-(async()=>{await run(false);await run(true);console.log('PASS: named lessons, deduplication, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});
+(async()=>{await run(false);await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});
