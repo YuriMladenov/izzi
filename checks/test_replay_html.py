@@ -71,5 +71,11 @@ class ReplayHTML(unittest.TestCase):
                               input=shim,text=True,capture_output=True,timeout=10)
         self.assertEqual(0,result.returncode,result.stdout+result.stderr)
 
+    @unittest.skipUnless(shutil.which('node'),'Node.js required for bookmarklet runtime test')
+    def test_bookmarklet_selection(self):
+        result=subprocess.run(['node',str(Path(__file__).with_name('test_bookmarklet.js'))],
+                              text=True,capture_output=True,timeout=10)
+        self.assertEqual(0,result.returncode,result.stdout+result.stderr)
+
 
 if __name__=='__main__':unittest.main()
