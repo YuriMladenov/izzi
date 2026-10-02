@@ -2,11 +2,12 @@ import html,json,mimetypes,re,time
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from pathlib import Path
 from html.parser import HTMLParser
-from urllib.parse import quote,unquote,urlparse
+from urllib.parse import quote,unquote,urlparse,parse_qs
 from config import *
 from media_mapping import lesson_media
 from assembled_media import resolve as resolve_assembled
 import progress_journal
+import library_catalog
 from import_har import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
@@ -334,7 +335,7 @@ class H(BaseHTTPRequestHandler):
             if not isinstance(m,dict) or not isinstance(books,dict):raise ValueError('invalid state root')
         except (OSError,ValueError) as error:
             print('[STATE ERROR]',type(error).__name__)
-            return self.sendb(b'Archive state unavailable. Stop capture and run lesson_diagnostic.bat.','text/plain; charset=utf-8',503)
+            return self.sendb(b'Archive state unavailable. Stop capture and run checks/lesson_diagnostic.bat.','text/plain; charset=utf-8',503)
         if p.path=="/":
             items=[]
             for bid,b in sorted(books.items()):
@@ -346,10 +347,22 @@ class H(BaseHTTPRequestHandler):
         if p.path.startswith("/__book__/"):
             bid=p.path.split("/")[-1];b=books.get(bid)
             if not b:return self.sendb(b"Unknown book","text/plain",404)
-            ls=sorted(b.get("lessons",{}).values(),key=lambda x:int(x["id"]))
-            items=''.join('<li><a href="%s">%s</a> <small>(%s)</small></li>'%(html.escape(x["path"]),html.escape(x["title"]),x["id"]) for x in ls)
+            try:
+                preferences=load_archive_state(STATE_DIR/'library_catalog.json',{})
+                session=load_archive_state(STATE_DIR/'capture_session.json',{'visits':[]})
+                ls=library_catalog.ordered_lessons(bid,b,session,preferences)
+            except (OSError,ValueError,TypeError,AttributeError):
+                return self.sendb(b'Library settings unavailable','text/plain',503)
+            if p.query=='edit=1':
+                rows=[]
+                for index,x in enumerate(ls,1):
+                    lid=html.escape(x['id'],quote=True)
+                    rows.append('<tr><td>%s</td><td><input type="number" name="order_%s" value="%d" required></td><td><input name="name_%s" value="%s" maxlength="300"></td><td><input type="checkbox" name="hidden_%s" %s></td></tr>'%(lid,lid,index,lid,html.escape(x['title'],quote=True),lid,'checked' if x['hidden'] else ''))
+                page='<!doctype html><meta charset="utf-8"><h1>Подреждане на уроци</h1><p>По-малкият номер се показва по-рано. Скриването запазва архивираните файлове и директните адреси на уроците.</p><form method="post" action="/__catalog__/%s"><table><tr><th>ID</th><th>Ред</th><th>Име</th><th>Скрит</th></tr>%s</table><button>Запази</button></form><p><a href="/__book__/%s">Назад</a></p>'%(html.escape(bid),''.join(rows),html.escape(bid))
+                return self.sendb(page.encode(),'text/html; charset=utf-8')
+            items=''.join('<li><a href="%s">%s</a> <small>(%s)</small></li>'%(html.escape(x["path"]),html.escape(x["title"]),html.escape(x["id"])) for x in ls if not x['hidden'])
             known,available=page_counts(m,bid,b)
-            return self.sendb(('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a></p><ol>%s</ol>'%(html.escape(b["title"]),html.escape(bid),known,available,items)).encode(),"text/html; charset=utf-8")
+            return self.sendb(('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a> · <a href="?edit=1">Подреди / преименувай / скрий</a></p><ol>%s</ol>'%(html.escape(b["title"]),html.escape(bid),known,available,items)).encode(),"text/html; charset=utf-8")
         if p.path=="/__offline__/gtag.js":
             return self.sendb(b"window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){window.dataLayer.push(arguments);};","application/javascript")
         if p.path=="/__offline__/youtube-api.js":
@@ -402,7 +415,34 @@ class H(BaseHTTPRequestHandler):
             return self.sendb(b'{"saved":false,"error":"journal_write_failed"}',"application/json",500)
         print("[PROGRESS]",bid,self.command,urlparse(self.path).path)
         self.sendb(b'{"offline":true,"saved":true}',"application/json",200)
-    def do_POST(self):self.progress()
+    def do_POST(self):
+        if urlparse(self.path).path.startswith('/__catalog__/'):
+            return self.catalog_save()
+        self.progress()
+
+    def catalog_save(self):
+        # Browser cross-origin writes must not modify the local catalogue.
+        origin=self.headers.get('Origin')
+        if origin and origin!='http://'+self.headers.get('Host',''):
+            return self.sendb(b'Forbidden origin','text/plain',403)
+        if self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type','').split(';')[0]!='application/x-www-form-urlencoded':
+            return self.sendb(b'Invalid form','text/plain',400)
+        try:
+            length=int(self.headers.get('Content-Length','0'))
+            if not 0<length<=1024*1024:raise ValueError('invalid length')
+            self.connection.settimeout(15)
+            raw=self.rfile.read(length)
+            if len(raw)!=length:raise ValueError('incomplete form')
+            bid=urlparse(self.path).path.split('/')[-1]
+            books=load_archive_state(BOOKS_FILE,{})
+            if bid not in books:return self.sendb(b'Unknown book','text/plain',404)
+            form=parse_qs(raw.decode('utf-8'),keep_blank_values=True)
+            library_catalog.update(STATE_DIR/'library_catalog.json',bid,books[bid].get('lessons',{}),form)
+        except (ValueError,UnicodeError):
+            return self.sendb(b'Invalid catalogue form','text/plain',400)
+        except (OSError,TimeoutError):
+            return self.sendb(b'Catalogue save failed','text/plain',500)
+        return self.sendb(b'','text/plain',303,{'Location':'/__book__/'+quote(bid,safe='')})
     def do_PUT(self):self.progress()
     def do_PATCH(self):self.progress()
     def do_DELETE(self):self.progress()
