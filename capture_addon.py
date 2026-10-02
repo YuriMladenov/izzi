@@ -9,6 +9,7 @@ from media_mapping import add_media
 from capture_session import event
 from capture_observed import observe
 from active_lesson import set_active, clear as clear_active
+from replay_resolver import find,usable_body
 from cache_bust_recovery import canonical_url,is_recovery_url,note as note_recovery
 
 MAX_BODY=250*1024*1024
@@ -21,6 +22,20 @@ def request(flow:http.HTTPFlow):
     p=urlparse(flow.request.pretty_url)
 
     # Local-only control endpoints: never forwarded upstream.
+    if p.hostname==SOURCE_HOST and p.path=="/__offline_capture__/image_status":
+        requested=(parse_qs(p.query).get('url') or [''])[0]
+        target=urlparse(requested)
+        try:
+            mapping=load_json(URL_MAP_FILE,{})
+            ext=Path(target.path).suffix.lower()
+            row=find(mapping,target.hostname or '',target.path,target.query,
+                     lambda r:usable_body(r,ARCHIVE_DIR,ext)) if allowed(target.hostname) else None
+            body=json.dumps({'capture':True,'available':bool(row)}).encode()
+            flow.response=http.Response.make(200,body,{'Content-Type':'application/json','Cache-Control':'no-store'})
+        except (OSError,ValueError):
+            flow.response=http.Response.make(503,b'{"capture":true,"available":false}',{'Content-Type':'application/json'})
+        return
+
     if p.hostname=="bg.izzi.digital" and p.path=="/__offline_capture__/recovery_manifest":
         try:
             q=STATE_DIR/"recovery_manifest.json"
@@ -36,9 +51,10 @@ def request(flow:http.HTTPFlow):
         q=parse_qs(p.query); kind=(q.get("kind") or ["event"])[0]
         book=(q.get("book") or [None])[0]; lesson=(q.get("lesson") or [None])[0]
         url=(q.get("url") or [None])[0]
-        event(kind,book,lesson,url)
+        extra={k:v[0] for k,v in q.items() if k in ("asset","reason","total","failed")}
+        event(kind,book,lesson,url,extra)
         if kind in ("lesson-start","lesson-active"): set_active(book,lesson,url)
-        elif kind in ("lesson-done","book-done"): clear_active()
+        elif kind in ("lesson-done","lesson-incomplete","book-done","book-incomplete"): clear_active()
         flow.response=http.Response.make(204,b"",{
             "Access-Control-Allow-Origin":"*","Cache-Control":"no-store"})
         return
@@ -56,6 +72,8 @@ def request(flow:http.HTTPFlow):
 
 def response(flow:http.HTTPFlow):
     if flow.response is None:return
+    control=urlparse(flow.request.pretty_url)
+    if control.hostname==SOURCE_HOST and control.path.startswith("/__offline_capture__/"):return
     request_url=flow.request.pretty_url.split("#",1)[0]
     recovering=is_recovery_url(request_url)
     url=canonical_url(request_url) if recovering else request_url

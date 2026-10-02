@@ -57,6 +57,17 @@ class LibraryWorkflow(unittest.TestCase):
         try:response=self.opener.open(req,timeout=5)
         except urllib.error.HTTPError as error:response=error
         with response:return response.code,response.headers,response.read()
+    def test_latest_incomplete_capture_overrides_old_done(self):
+        self.completed(1)
+        session=json.loads((self.state/'capture_session.json').read_text())
+        session['visits'].append(dict(kind='lesson-incomplete',book='1',lesson='0'))
+        self.write('capture_session.json',session)
+        self.assertEqual(self.report()['label'],'INCOMPLETE')
+        self.assertEqual(self.report()['done'],[])
+        session['visits'].append(dict(kind='lesson-done',book='1',lesson='0'))
+        self.write('capture_session.json',session)
+        self.assertEqual(self.report()['done'],['0'])
+
     def test_catalogue_order_rename_hide_and_persistence(self):
         books={'1':{'title':'Book','lessons':{'9':{'id':'9','title':'Nine','path':'/DOS/1/9.html'},'2':{'id':'2','title':'Two','path':'/DOS/1/2.html'},'5':{'id':'5','title':'Five','path':'/DOS/1/5.html'}}}}
         self.write('books.json',books)

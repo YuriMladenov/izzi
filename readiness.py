@@ -72,7 +72,11 @@ def assess(root):
     results=[]
     for bid,lids in sorted(books.items()):
         starts={str(v['lesson']) for v in visits if isinstance(v,dict) and str(v.get('book'))==bid and v.get('kind')=='lesson-start' and v.get('lesson')}
-        dones={str(v['lesson']) for v in visits if isinstance(v,dict) and str(v.get('book'))==bid and v.get('kind')=='lesson-done' and v.get('lesson')}
+        outcomes={}
+        for v in visits:
+            if isinstance(v,dict) and str(v.get('book'))==bid and v.get('lesson') and v.get('kind') in ('lesson-done','lesson-incomplete'):
+                outcomes[str(v['lesson'])]=v['kind']
+        dones={lid for lid,kind in outcomes.items() if kind=='lesson-done'}
         traversal_missing=lids-dones
         lesson_missing=[f'/DOS/{bid}/{lid}.html' for lid in sorted(lids)
                         if not available(mapping,f'https://bg.izzi.digital/DOS/{bid}/{lid}.html',archive,bid)]

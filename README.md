@@ -180,6 +180,14 @@ Capture пази декодирани HTML/JS/CSS bodies, вместо gzip/Brot
 
 Capture премахва conditional cache headers и добавя no-cache directives за обичайни IZZI GET/HEAD заявки. Реалният Referer има приоритет при lesson/media mapping; краткотрайният `lesson-active` контекст служи като fallback. Няма глобално прехвърляне на медия между уроци.
 
+### Проверка на изображенията при обход
+
+След зареждане на всеки урок bookmarklet събира изображенията от HTML, image/custom elements, srcset и вложения HTML в конфигурациите на упражненията. Заявява IZZI изображенията през браузъра (до четири едновременно), изчаква load/error и проверява чрез capture proxy дали има годен архивиран body. Използва реално посочените URL-и; не предполага други адреси. След повторни сканирания за динамични изображения преминава нататък. При грешка прави втори опит.
+
+`image-failed` записите в `checks\capture_session_report.bat` показват адрес и причина; `images-checked` съдържа броя проверени и неуспешни изображения. Урок с грешка получава `lesson-incomplete`, а не `lesson-done`. Readiness използва последния done/incomplete резултат за всеки урок. Отчитат се и iframe/login проблеми и незаписан HTML. Външни изображения се отбелязват като непълни, тъй като proxy архивира само IZZI.
+
+Нужни са обновеният capture addon и обновеният Firefox bookmark; спрете и стартирайте отново capture след обновяване. Започнете с проблемния урок 1408780 и проверете image-failed и readiness след обхода. Целта е потвърдено зареждане и записване на всички открити изображения, а не безусловен успех: origin 404, timeout и блокирани ресурси се показват като пропуски. Изображения, появяващи се само след непосетени интеракции, не могат да се открият предварително. Видеата продължават да изискват отделна проверка.
+
 ## Подреждане, преименуване и скриване
 
 На страницата на учебника изберете **Подреди / преименувай / скрий**. Задайте номера в колоната „Ред“ (по-малкият е по-рано), редактирайте името и отметнете „Скрит“ за ненужните страници. Натиснете „Запази“. Скритите уроци остават достъпни в редактора, където можете да ги покажете отново.
@@ -210,7 +218,7 @@ Readiness може да завърши с грешка за непълен ли�
 | Команда | Предназначение |
 | --- | --- |
 | `checks\validate_replay.bat` | 22 synthetic HTTP проверки; не валидира личния архив |
-| `checks\test_library_workflow.bat` | 19 regression теста с временни данни |
+| `checks\test_library_workflow.bat` | 20 regression теста с временни данни |
 | `checks\test_media_contract.bat` | Media mapping/server API contract |
 | `checks\final_readiness_report.bat`, `checks\book_readiness_report.bat` | Пълнота на текущия archive/state |
 | `checks\missing_assets_report.bat` | Известни пропуски и origin 404 warnings |
@@ -281,7 +289,7 @@ Media shim премахва невалидни `#`/lesson HTML sources и наб
 .venv/bin/python checks/test_replay_html.py
 ```
 
-Последната проверка: 22 HTTP + 19 workflow + 11 HTML/runtime теста са успешни; два runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
+Последната проверка: 22 HTTP + 20 workflow + 11 HTML/runtime теста са успешни; два runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
 
 ## История на версиите
 
