@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from config import *
 from import_har import load as load_json
-base=f"http://{HOST}:{PORT}"
+base=f"http://{CLIENT_HOST}:{PORT}"
 books=load_json(BOOKS_FILE,{})
 um=load_json(URL_MAP_FILE,{})
 tests=[("/",None)]

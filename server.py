@@ -453,5 +453,6 @@ class H(BaseHTTPRequestHandler):
 
 if __name__=="__main__":
     for d in (ARCHIVE_DIR,STATE_DIR,CAPTURES_DIR,PROGRESS_DIR):d.mkdir(parents=True,exist_ok=True)
-    print(f"IZZI Offline Library v3.3.1: http://{HOST}:{PORT}/")
+    print(f"IZZI Offline Library: http://{CLIENT_HOST}:{PORT}/")
+    print(f"Listening on {HOST}:{PORT}; LAN access: http://<computer IPv4>:{PORT}/")
     ThreadingHTTPServer((HOST,PORT),H).serve_forever()

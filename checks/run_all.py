@@ -30,7 +30,7 @@ def main():
             for name in REPORTS:run(name)
             import config
             import server
-            base=f'http://{config.HOST}:{config.PORT}'
+            base=f'http://{config.CLIENT_HOST}:{config.PORT}'
             try:
                 owned=ThreadingHTTPServer((config.HOST,config.PORT),server.H)
                 thread=threading.Thread(target=owned.serve_forever,daemon=True);thread.start()
