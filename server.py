@@ -235,7 +235,9 @@ def current_missing(events,mapping):
 def progress_summary(book_id):
     f=PROGRESS_DIR/(str(book_id)+".jsonl")
     if not f.exists():return 0
-    try:return sum(1 for x in f.open(encoding="utf-8") if x.strip())
+    try:
+        with f.open(encoding="utf-8") as stream:
+            return sum(1 for x in stream if x.strip())
     except:return 0
 def missing_log():return STATE_DIR/"missing_resources.jsonl"
 
@@ -374,11 +376,12 @@ class H(BaseHTTPRequestHandler):
         if p.path=="/__missing__":
             events=[];seen=set();f=missing_log()
             if f.exists():
-                for line in f.open(encoding="utf-8"):
-                    try:e=json.loads(line)
-                    except:continue
-                    k=(e.get("host"),e.get("path"),e.get("query"))
-                    if k not in seen:seen.add(k);events.append(e)
+                with f.open(encoding="utf-8") as stream:
+                    for line in stream:
+                        try:e=json.loads(line)
+                        except:continue
+                        k=(e.get("host"),e.get("path"),e.get("query"))
+                        if k not in seen:seen.add(k);events.append(e)
             missing,warnings,resolved=current_missing(events,m)
             def rows(items):return ''.join('<li>%s <code>%s</code></li>'%(label,html.escape(url)) for label,url in items)
             page='<!doctype html><meta charset="utf-8"><h1>Текущи липсващи ресурси (%d)</h1><p>Възстановени от историческия лог: %d. Логът е запазен.</p><ul>%s</ul><h2>Предупреждения (%d)</h2><ul>%s</ul>'%(len(missing),resolved,rows(missing),len(warnings),rows(warnings))
