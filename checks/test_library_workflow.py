@@ -204,6 +204,21 @@ class LibraryWorkflow(unittest.TestCase):
         text=self.request('/__missing__')[2].decode()
         self.assertNotIn('restored.png',text);self.assertIn('UPSTREAM 404 WARNING',text)
         self.assertEqual(5,len((self.state/'missing_resources.jsonl').read_text().splitlines()))
+        self.assertIn('https://bg.izzi.digital/DOS/1/missing.png?__izzi_offline_recover=',text)
+        self.assertEqual(4,text.count('>Изтегли</a>'))
+        self.assertIn('rel="noopener noreferrer"',text)
+    def test_download_status_checks_actual_archive_and_rejects_external_host(self):
+        self.add('/datastore/test.png',b'\x89PNGfixture',content_type='image/png')
+        self.start_server()
+        from urllib.parse import urlencode
+        def status(url):return self.request('/__offline__/asset-status?'+urlencode({'url':url}))
+        self.assertTrue(json.loads(status('https://api.izzi.digital/datastore/test.png')[2])['available'])
+        self.assertFalse(json.loads(status('https://api.izzi.digital/datastore/missing.png')[2])['available'])
+        self.assertEqual(status('https://external.example/test.png')[0],400)
+        page=self.request('/__missing__')[2].decode()
+        self.assertIn('id="download-all"',page);self.assertIn('id="download-stop"',page)
+        self.assertIn('Налични в архива:',page)
+
     def test_equal_book_titles_stay_separate_and_page_counts_use_bodies(self):
         self.write('books.json',{'1':{'title':'Same title','lessons':{'10':{'id':'10','path':'/DOS/1/10.html','title':'Page'}}},
             '2':{'title':'Same title','lessons':{'20':{'id':'20','path':'/DOS/2/20.html','title':'Page'}}}})

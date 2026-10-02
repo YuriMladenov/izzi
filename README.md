@@ -105,7 +105,7 @@ Addon пази bodies в `archive`, URL записи в `state/url_map.json`, к
 
 Вторият вариант изпълнява само четирите synthetic/contract suites и не проверява личния архив. Общият runner не стартира capture, import, repair, reset, recovery или Git update. HTTP probes минават през обичайния server и могат да допълнят missing log при пропуски. Индивидуалните инструменти остават в `checks/`.
 
-След края BAT запазва exit code: 0 при липса на FAILED проверки, 1 при неуспех. Пауза има само накрая. При информационни reports `OK` означава, че script е изпълнен; четете и неговите броячи. SKIPPED не означава успешно проверена медия. HTML/runtime suite изисква Node.js за два теста; без него те са пропуснати.
+След края BAT запазва exit code: 0 при липса на FAILED проверки, 1 при неуспех. Пауза има само накрая. При информационни reports `OK` означава, че script е изпълнен; четете и неговите броячи. SKIPPED не означава успешно проверена медия. HTML/runtime suite изисква Node.js за три теста; без него те са пропуснати.
 
 ## Firefox bookmarklet файлове
 
@@ -223,6 +223,10 @@ Recovery използва само вече наблюдавани URL-и, из�
 
 ## Проверки и диагностика
 
+**Изтегли всички** заявява ресурсите от списъка и предупрежденията последователно през браузъра, с recovery marker, и проверява записа им в текущия архив. Има брояч, краен резултат и бутон **Спри**. Нужно е интернет и активен browser capture proxy към компютъра с библиотеката. Непотвърден запис или origin 404 се отчита като неуспех; успешната мрежова заявка сама по себе си не се обявява за архивиране. След края презаредете страницата.
+
+На страницата „Текущи липсващи ресурси“ бутонът **Изтегли** до всеки IZZI запис отваря оригиналния HTTPS адрес в нов таб с recovery marker за нова заявка. Нужно е Firefox да е настроен към активния capture proxy и да има интернет; нормалният browser login се запазва. След зареждане върнете се към списъка и го презаредете — годните възстановени ресурси изчезват. Бутонът не е директен server-side downloader и без capture отварянето не записва в архива. За LAN ползвайте browser proxy към компютъра с архива, не proxy на друг компютър. В логовете не се показват query параметри; ако ресурсът изисква специални параметри, отворете оригиналния урок през capture. Origin 404 не се възстановява само с натискане на бутона.
+
 Всички test/report/diagnostic scripts и отделните BAT wrappers са в `checks/`. В основната папка пуснете **`run_all_checks.bat`**: изпълнява проверките последователно, продължава след грешки и показва общ резултат. Не спира на всяка отделна проверка. За HTTP проверките стартира временен replay server, ако портът е свободен, и го спира след края; вече работещият server се запазва. MP4 URL се избира автоматично от complete assembly index; при липса на такъв тестът е SKIPPED. `run_all_checks.bat --synthetic-only` изпълнява само изолираните тестове.
 
 Readiness може да завърши с грешка за непълен личен архив, въпреки успешните synthetic тестове. `OK` при информационен отчет означава успешно изпълнение, а не пълен архив. Прегледайте броячите. Инструментите за capture, import, repair и update остават отделни оперативни команди; общият runner не ги изпълнява.
@@ -230,7 +234,7 @@ Readiness може да завърши с грешка за непълен ли�
 | Команда | Предназначение |
 | --- | --- |
 | `checks\validate_replay.bat` | 22 synthetic HTTP проверки; не валидира личния архив |
-| `checks\test_library_workflow.bat` | 20 regression теста с временни данни |
+| `checks\test_library_workflow.bat` | 21 regression теста с временни данни |
 | `checks\test_media_contract.bat` | Media mapping/server API contract |
 | `checks\final_readiness_report.bat`, `checks\book_readiness_report.bat` | Пълнота на текущия archive/state |
 | `checks\missing_assets_report.bat` | Известни пропуски и origin 404 warnings |
@@ -301,7 +305,7 @@ Media shim премахва невалидни `#`/lesson HTML sources и наб
 .venv/bin/python checks/test_replay_html.py
 ```
 
-Последната проверка: 22 HTTP + 20 workflow + 11 HTML/runtime теста са успешни; два runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
+Последната проверка: 22 HTTP + 21 workflow + 12 HTML/runtime теста са успешни; три runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
 
 ## История на версиите
 

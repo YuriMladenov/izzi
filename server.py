@@ -369,6 +369,13 @@ class H(BaseHTTPRequestHandler):
             return self.sendb(b"window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){window.dataLayer.push(arguments);};","application/javascript")
         if p.path=="/__offline__/youtube-api.js":
             return self.sendb(b'/* YouTube player API is unavailable in offline replay. */',"application/javascript")
+        if p.path=="/__offline__/asset-status":
+            target=urlparse(parse_qs(p.query).get('url',[''])[0])
+            if target.scheme not in ('http','https') or not _izzi_host(target.hostname) or target.username or target.password:
+                return self.sendb(b'{"available":false}',"application/json",400)
+            ext=Path(target.path).suffix.lower()
+            record=find(m,target.hostname,target.path,target.query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
+            return self.sendb(json.dumps({'available':bool(record)}).encode(),'application/json')
         if p.path=="/__offline__/progress":
             return self.sendb(json.dumps(progress_journal.summarize(PROGRESS_DIR),ensure_ascii=False).encode(),"application/json")
         if p.path.startswith("/__offline__/external-media/"):
@@ -383,8 +390,21 @@ class H(BaseHTTPRequestHandler):
                         k=(e.get("host"),e.get("path"),e.get("query"))
                         if k not in seen:seen.add(k);events.append(e)
             missing,warnings,resolved=current_missing(events,m)
-            def rows(items):return ''.join('<li>%s <code>%s</code></li>'%(label,html.escape(url)) for label,url in items)
+            def rows(items):
+                rendered=[]
+                marker=str(time.time_ns())
+                for label,url in items:
+                    original=urlparse('https://'+url)
+                    action=''
+                    if _izzi_host(original.hostname) and not original.username and not original.password:
+                        target='https://'+url+'?__izzi_offline_recover='+marker
+                        action=' <a class="download" href="%s" target="_blank" rel="noopener noreferrer">Изтегли</a>'%html.escape(target,quote=True)
+                    rendered.append('<li>%s <code>%s</code>%s</li>'%(label,html.escape(url),action))
+                return ''.join(rendered)
             page='<!doctype html><meta charset="utf-8"><h1>Текущи липсващи ресурси (%d)</h1><p>Възстановени от историческия лог: %d. Логът е запазен.</p><ul>%s</ul><h2>Предупреждения (%d)</h2><ul>%s</ul>'%(len(missing),resolved,rows(missing),len(warnings),rows(warnings))
+            page=page.replace('<h1>', '<style>.download{display:inline-block;padding:5px 10px;margin:4px;border:1px solid #567;border-radius:4px;text-decoration:none}li{margin:8px 0;overflow-wrap:anywhere}</style><p><a href="/">← Библиотека</a></p><p>„Изтегли“ отваря оригиналния ресурс в нов таб. За запис в архива използвай интернет и Firefox с включен capture proxy и Disable Cache. След зареждане се върни тук и презареди списъка. При достъп през LAN записването трябва да минава през capture proxy на компютъра с библиотеката. Origin 404 може да остане недостъпен.</p><h1>',1)
+            page+='<p><button id="download-all">Изтегли всички</button> <button id="download-stop" disabled>Спри</button></p><p id="download-status" role="status">Изтеглянето включва ресурсите от списъка и предупрежденията. Origin 404 може да остане недостъпен.</p>'
+            page+='<script>'+Path(__file__).with_name('missing_download.js').read_text(encoding='utf-8')+'</script>'
             return self.sendb(page.encode(),"text/html; charset=utf-8")
         if p.path.startswith("/__host__/"):
             rest=p.path[len("/__host__/"):]

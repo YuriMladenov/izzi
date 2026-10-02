@@ -77,5 +77,11 @@ class ReplayHTML(unittest.TestCase):
                               text=True,capture_output=True,timeout=10)
         self.assertEqual(0,result.returncode,result.stdout+result.stderr)
 
+    @unittest.skipUnless(shutil.which('node'),'Node.js required for bulk download runtime test')
+    def test_missing_download_runtime(self):
+        result=subprocess.run(['node',str(Path(__file__).with_name('test_missing_download.js'))],
+                              text=True,capture_output=True,timeout=10)
+        self.assertEqual(0,result.returncode,result.stdout+result.stderr)
+
 
 if __name__=='__main__':unittest.main()
