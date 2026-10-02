@@ -38,13 +38,13 @@ async function images(){
  const urls=[],events=[];let archived=true;
  class Image{set src(value){urls.push(value);this.naturalWidth=100;queueMicrotask(()=>this.onload());}}
  const lesson=new URL('https://bg.izzi.digital/DOS/1/8.html');
- const frame={contentWindow:{location:lesson,Image,innerHeight:900,scrollY:0,positions:[],scrollTo(x,y){this.scrollY=y;this.positions.push(y);}},contentDocument:{baseURI:lesson.href,querySelectorAll:()=>[],documentElement:{scrollHeight:3000,outerHTML:String.raw`<img src="https://api.izzi.digital/datastore/picture.png"><pkc :config='{&quot;description&quot;:&quot;&lt;img src=\&quot;/datastore/config.png\&quot;&gt;&quot;}'></pkc>`}}};
+ const frame={contentWindow:{location:lesson,Image,innerHeight:900,scrollY:0,positions:[],scrollTo(x,y){this.scrollY=y;this.positions.push(y);}},contentDocument:{baseURI:lesson.href,querySelectorAll:()=>[],documentElement:{scrollHeight:3000,outerHTML:String.raw`<img src="https://api.izzi.digital/datastore/picture.png"><pkc :config='{&quot;description&quot;:&quot;&lt;img src=\&quot;/datastore/config.png\&quot;&gt;&quot;}'></pkc><script>const path="/publication/1/pictures/false.png";</script><svg><use href="/profil/sprite.symbol.svg#icon"></use></svg>`}}};
  const textarea=()=>({set innerHTML(text){this.value=text.replaceAll('&quot;','"').replaceAll('&lt;','<').replaceAll('&gt;','>').replaceAll('&amp;','&');}});
  const capture=vm.runInNewContext(helper+';captureLessonImages',{O:lesson.origin,document:{createElement:textarea},URL,URLSearchParams,AbortController,console:{warn:()=>{}},setTimeout:(f,ms)=>{if(ms===1000||ms===500)queueMicrotask(f);return 1;},clearTimeout:()=>{},fetch:async url=>({ok:true,json:async()=>({available:new URL(url).searchParams.get('url').endsWith('.html')||archived})})});
  const result=await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}));
  assert(frame.contentWindow.positions.includes(2100));assert.equal(frame.contentWindow.scrollY,0);assert.equal(result.total,2);assert.equal(result.failed,0);
- assert(urls.includes('https://api.izzi.digital/datastore/picture.png'));
- assert(urls.includes('https://bg.izzi.digital/datastore/config.png'));
+ assert(urls.some(u=>u.startsWith('https://api.izzi.digital/datastore/picture.png?__izzi_offline_recover=')));
+ assert(urls.some(u=>u.startsWith('https://bg.izzi.digital/datastore/config.png?__izzi_offline_recover=')));
  archived=false;events.length=0;
  const failed=await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}));
  assert.equal(failed.failed,2);assert.equal(events.filter(x=>x.kind==='image-failed').length,2);
