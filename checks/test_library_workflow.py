@@ -207,12 +207,53 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertIn('https://bg.izzi.digital/DOS/1/missing.png?__izzi_offline_recover=',text)
         self.assertEqual(4,text.count('>Изтегли</a>'))
         self.assertIn('rel="noopener noreferrer"',text)
+    def test_operations_local_control_and_fixed_actions(self):
+        import operations
+        self.start_server()
+        status=self.request('/__ops__/status')
+        self.assertEqual(status[0],200)
+        self.assertIn('capture',json.loads(status[2]))
+        self.assertEqual(self.request('/__ops__/status',headers={'Host':'192.168.1.20'})[0],403)
+        page=self.request('/__operations__',headers={'Host':'192.168.1.20'})[2].decode()
+        self.assertNotIn(operations.tasks.token,page)
+        payload=json.dumps({'task':'checks','action':'start'}).encode()
+        headers={'Content-Type':'application/json','X-IZZI-Control':operations.tasks.token}
+        with patch.object(operations.tasks,'start') as start:
+            self.assertEqual(self.request('/__ops__/action',payload,{'Content-Type':'application/json'})[0],403)
+            self.assertEqual(self.request('/__ops__/action',payload,{**headers,'Origin':'https://external.example'})[0],403)
+            self.assertEqual(self.request('/__ops__/action',payload,{**headers,'Host':'192.168.1.20'})[0],403)
+            start.assert_not_called()
+            self.assertEqual(self.request('/__ops__/action',payload,headers)[0],200)
+            start.assert_called_once_with('checks')
+        self.assertEqual(self.request('/__ops__/action',b'{"task":"shell","action":"start"}',headers)[0],400)
+
+    def test_operations_owned_process_lifecycle_and_log(self):
+        import operations,time
+        tasks=operations.Tasks()
+        try:
+            tasks.start('checks',[sys.executable,'-u','-c','import time;print("TASK OUTPUT",flush=True);time.sleep(30)'])
+            with self.assertRaises(ValueError):tasks.start('checks')
+            for _ in range(100):
+                if 'TASK OUTPUT' in tasks.snapshot()['checks']['log']:break
+                time.sleep(.02)
+            self.assertEqual(tasks.snapshot()['checks']['state'],'running')
+            self.assertIn('TASK OUTPUT',tasks.snapshot()['checks']['log'])
+            tasks.stop('checks')
+            self.assertEqual(tasks.snapshot()['checks']['state'],'stopped')
+            tasks.start('checks',[sys.executable,'-u','-c','print("FINISHED")'])
+            for _ in range(100):
+                if tasks.snapshot()['checks']['state']!='running':break
+                time.sleep(.02)
+            self.assertEqual(tasks.snapshot()['checks']['state'],'success')
+            self.assertEqual(tasks.snapshot()['checks']['exit_code'],0)
+        finally:tasks.close()
+
     def test_webui_assets_help_and_empty_library(self):
         self.start_server()
         page=self.request('/')[2].decode()
         self.assertIn('lang="bg"',page);self.assertIn('Библиотеката е празна',page)
         self.assertIn('/__ui__/app.css',page);self.assertIn('/__ui__/app.js',page)
-        for path,mime in [('/__ui__/app.css','text/css'),('/__ui__/app.js','application/javascript')]:
+        for path,mime in [('/__ui__/app.css','text/css'),('/__ui__/app.js','application/javascript'),('/__ui__/operations.js','application/javascript')]:
             code,headers,body=self.request(path)
             self.assertEqual(code,200);self.assertTrue(headers['Content-Type'].startswith(mime));self.assertTrue(body)
         self.assertIn('capture_mode.bat',self.request('/__help__')[2].decode())

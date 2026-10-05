@@ -9,6 +9,7 @@ from assembled_media import resolve as resolve_assembled
 import progress_journal
 import library_catalog
 import webui
+import operations
 from import_har import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
@@ -333,9 +334,22 @@ class H(BaseHTTPRequestHandler):
 
     def route(self):
         p=urlparse(self.path)
-        if p.path in ('/__ui__/app.css','/__ui__/app.js'):
+        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js'):
             filename=p.path.rsplit('/',1)[1]
             return self.sendb((webui.ASSETS/filename).read_bytes(),'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
+        if p.path=='/__ops__/status':
+            if not self.control_local():return self.sendb(b'{"error":"Local access only"}','application/json',403)
+            return self.sendb(json.dumps(operations.tasks.snapshot(),ensure_ascii=False).encode(),'application/json')
+        if p.path=='/__operations__':
+            content='<h1>Capture и проверки</h1>'
+            if not self.control_local():
+                content+='<p class="empty">Управлението е достъпно само на компютъра със сървъра през http://127.0.0.1:8765/.</p>'
+            else:
+                content+='<p>Firefox proxy: 127.0.0.1:8877. Login, сертификатът и Disable Cache се настройват в браузъра. При активен capture отчетите показват текущия момент; окончателните проверки пусни след обхода.</p><div id="operations" data-token="%s"><p id="operation-message" role="status"></p>'%html.escape(operations.tasks.token,quote=True)
+                for task,title in [('capture','Capture proxy'),('checks','Всички проверки')]:
+                    content+='<section class="task-panel"><h2>%s</h2><p id="%s-state" role="status">Зареждане…</p><button data-task="%s" data-action="start" disabled>Стартирай</button> <button data-task="%s" data-action="stop" disabled>Спри</button><pre id="%s-log" class="task-log" aria-label="Лог %s"></pre></section>'%(title,task,task,task,task,title)
+                content+='</div><script src="/__ui__/operations.js" defer></script>'
+            return self.sendb(webui.page(content,'Управление','operations').encode(),'text/html; charset=utf-8')
         if p.path=='/__help__':
             content='<h1>Как да използвам библиотеката</h1><h2>1. Запиши съдържание</h2><p>На компютъра с архива стартирай capture_mode.bat. Настрой Firefox proxy към 127.0.0.1:8877 и отвори оригиналния учебник с нормален login. Включи Disable Cache. Използвай обновения bookmarklet за избрания срок или раздел.</p><h2>2. Провери и подреди</h2><p>Изпълни run_all_checks.bat. Отвори учебника в библиотеката и избери „Подреди / преименувай / скрий“ за локални настройки.</p><h2>3. Възстанови ресурси</h2><p>От „Липсващи ресурси“ използвай „Изтегли“ или „Изтегли всички“ при интернет и активен capture proxy. След края презареди списъка.</p><h2>Достъп от локалната мрежа</h2><p>От друго устройство отвори http://&lt;IPv4 на компютъра&gt;:8765/. Firewall трябва да допуска порт 8765 в Private мрежата. Няма login защита; използвай доверена мрежа.</p><h2>Обновяване</h2><p>Спри capture и сървъра, запази резервно копие на archive/state и пусни update_project.bat. Стартирай сървъра отново. При нов bookmarklet обнови и адреса на Firefox bookmark.</p>'
             return self.sendb(webui.page(content,'Помощ','help').encode(),'text/html; charset=utf-8')
@@ -460,9 +474,36 @@ class H(BaseHTTPRequestHandler):
         print("[PROGRESS]",bid,self.command,urlparse(self.path).path)
         self.sendb(b'{"offline":true,"saved":true}',"application/json",200)
     def do_POST(self):
+        if urlparse(self.path).path=='/__ops__/action':return self.control_action()
         if urlparse(self.path).path.startswith('/__catalog__/'):
             return self.catalog_save()
         self.progress()
+
+    def control_local(self):
+        # Check the socket peer AND Host; forwarded headers are never trusted.
+        host=urlparse('http://'+self.headers.get('Host','')).hostname
+        return self.client_address[0] in ('127.0.0.1','::1') and host in ('127.0.0.1','localhost','::1')
+
+    def control_action(self):
+        origin=self.headers.get('Origin')
+        if not self.control_local() or (origin and origin!='http://'+self.headers.get('Host','')) or self.headers.get('X-IZZI-Control')!=operations.tasks.token:
+            self.close_connection=True
+            return self.sendb(b'{"error":"Local control required"}','application/json',403)
+        try:
+            if self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type')!='application/json':raise ValueError('Invalid request')
+            length=int(self.headers.get('Content-Length','0'))
+            if not 0<length<=2048:raise ValueError('Invalid length')
+            self.connection.settimeout(10)
+            raw=self.rfile.read(length)
+            if len(raw)!=length:raise ValueError('Incomplete request')
+            data=json.loads(raw)
+            if not isinstance(data,dict) or data.get('task') not in ('capture','checks') or data.get('action') not in ('start','stop'):raise ValueError('Unknown command')
+            if data['action']=='start':operations.tasks.start(data['task'])
+            else:operations.tasks.stop(data['task'])
+        except (ValueError,OSError,TimeoutError) as error:
+            self.close_connection=True
+            return self.sendb(json.dumps({'error':str(error)},ensure_ascii=False).encode(),'application/json',400)
+        return self.sendb(b'{"ok":true}','application/json')
 
     def catalog_save(self):
         # Browser cross-origin writes must not modify the local catalogue.
@@ -496,4 +537,7 @@ if __name__=="__main__":
     for d in (ARCHIVE_DIR,STATE_DIR,CAPTURES_DIR,PROGRESS_DIR):d.mkdir(parents=True,exist_ok=True)
     print(f"IZZI Offline Library: http://{CLIENT_HOST}:{PORT}/")
     print(f"Listening on {HOST}:{PORT}; LAN access: http://<computer IPv4>:{PORT}/")
-    ThreadingHTTPServer((HOST,PORT),H).serve_forever()
+    try:
+        ThreadingHTTPServer((HOST,PORT),H).serve_forever()
+    finally:
+        operations.tasks.close()

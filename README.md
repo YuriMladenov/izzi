@@ -4,6 +4,10 @@
 
 ## WebUI
 
+От **Capture и проверки** можете да стартирате/спирате capture proxy и общите проверки, да виждате статуса, exit code и последните 500 лог реда. Управлението и логовете са разрешени само от самия компютър през `127.0.0.1`/`localhost`; LAN страницата показва указание вместо бутоните. Заявките се ограничават до две фиксирани задачи и start/stop, със защита на локалния Host, socket peer, Origin и control token. Не се приемат произволни команди.
+
+Сървърът стартира процесите директно, без BAT паузи, не допуска повторно стартиране на активна задача и спира само собствените процеси. Зает capture порт се отчита като грешка — външен proxy не се прекратява. Capture използва mitmdump от текущата Python среда или PATH; при липса пуснете install_capture.bat. Настройте Firefox proxy `127.0.0.1:8877`, сертификата, login и Disable Cache ръчно. След спиране възстановете нормалните proxy настройки. При нормално спиране на server се спират и управляваните задачи; преди затваряне на Windows терминала е препоръчително да използвате „Спри“. Финалните readiness отчети пускайте след приключване на capture.
+
 След `start_library.bat` отворете `http://127.0.0.1:8765/` или LAN адреса на компютъра. WebUI работи с локални CSS/JavaScript файлове, без CDN, интернет fonts или допълнителен frontend server. Оригиналните архивирани уроци се отварят от съществуващите replay адреси.
 
 - **Библиотека:** карти с имена, book IDs и реални archive броячи; търсене по име и ID.
@@ -12,7 +16,7 @@
 - **Локален журнал:** броячи по book и endpoint, без показване на private request bodies.
 - **Помощ:** capture, проверки, подреждане, обновяване и LAN инструкции.
 
-Изгледът е responsive за компютър и телефон. Без JavaScript основната навигация и server-rendered списъците остават достъпни; търсенето и общото изтегляне изискват JavaScript. `webui.py` изгражда общия HTML shell; `webui/app.css` и `webui/app.js` обслужват изгледа и търсенето. WebUI не стартира BAT команди на компютъра и не заменя Firefox capture workflow.
+Изгледът е responsive за компютър и телефон. Без JavaScript основната навигация и server-rendered списъците остават достъпни; търсенето и общото изтегляне изискват JavaScript. `webui.py` изгражда общия HTML shell; `webui/app.css` и `webui/app.js` обслужват изгледа и търсенето. WebUI използва фиксирани фонови процеси за capture и проверки; Firefox login/proxy workflow остава отделен.
 
 ## Как работи проектът
 
@@ -246,7 +250,7 @@ Readiness може да завърши с грешка за непълен ли�
 | Команда | Предназначение |
 | --- | --- |
 | `checks\validate_replay.bat` | 22 synthetic HTTP проверки; не валидира личния архив |
-| `checks\test_library_workflow.bat` | 23 regression теста с временни данни |
+| `checks\test_library_workflow.bat` | 25 regression теста с временни данни |
 | `checks\test_media_contract.bat` | Media mapping/server API contract |
 | `checks\final_readiness_report.bat`, `checks\book_readiness_report.bat` | Пълнота на текущия archive/state |
 | `checks\missing_assets_report.bat` | Известни пропуски и origin 404 warnings |
@@ -317,7 +321,7 @@ Media shim премахва невалидни `#`/lesson HTML sources и наб
 .venv/bin/python checks/test_replay_html.py
 ```
 
-Последната проверка: 22 HTTP + 23 workflow + 13 HTML/runtime теста са успешни; четири runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
+Последната проверка: 22 HTTP + 25 workflow + 13 HTML/runtime теста са успешни; четири runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
 
 ## История на версиите
 
