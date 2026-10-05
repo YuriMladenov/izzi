@@ -35,9 +35,13 @@ def usable_body(r,archive,ext=''):
     if ext in {'.woff','.woff2','.ttf','.otf'}:
         with blob.open('rb') as stream:magic=stream.read(4)
         if magic not in (b'wOF2',b'wOFF',b'OTTO',b'\x00\x01\x00\x00',b'ttcf',b'true'):return False
-    if ext in {'.svg','.png','.jpg','.jpeg','.webp','.gif'}:
+    if ext in {'.svg','.png','.jpg','.jpeg','.webp','.gif','.exe','.sb','.sb2','.sb3','.zip','.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx'}:
         with blob.open('rb') as stream:header=stream.read(1024)
         if not header or re.search(br'<(?:!doctype\s+html|html)\b',header,re.I):return False
+    if ext in {'.exe','.sb3','.sb2'}:
+        with blob.open('rb') as stream:magic=stream.read(4)
+        if ext=='.exe' and not magic.startswith(b'MZ'):return False
+        if ext in {'.sb3','.sb2'} and not magic.startswith(b'PK'):return False
     return True
 
 def pick(rs,usable=None):

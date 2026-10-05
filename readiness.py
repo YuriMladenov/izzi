@@ -7,7 +7,7 @@ from replay_resolver import find,book_ids,_izzi_host,usable_body
 
 LESSON=re.compile(r'^/DOS/(\d+)/(\d+)\.html$')
 IMPORTANT={'.html','.js','.mjs','.css','.json','.svg','.png','.jpg','.jpeg','.webp','.gif',
-           '.woff','.woff2','.ttf','.otf','.mp4','.mp3','.wav','.ogg','.m4a','.wasm','.pdf'}
+           '.woff','.woff2','.ttf','.otf','.mp4','.mp3','.wav','.ogg','.m4a','.wasm','.pdf','.exe','.sb','.sb2','.sb3','.zip','.docx','.xlsx','.pptx'}
 
 def read_state(path,default,errors):
     if not path.exists():return default

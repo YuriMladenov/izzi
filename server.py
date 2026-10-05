@@ -13,7 +13,7 @@ import operations
 from import_har import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
-DOC_EXT={".pdf",".doc",".docx",".xls",".xlsx",".ppt",".pptx",".zip",".rar",".7z",".txt",".rtf",".odt",".ods",".odp",".epub"}
+DOC_EXT={".exe",".sb",".sb2",".sb3",".csv",".pdf",".doc",".docx",".xls",".xlsx",".ppt",".pptx",".zip",".rar",".7z",".txt",".rtf",".odt",".ods",".odp",".epub"}
 MEDIA_EXT={".mp3",".wav",".ogg",".m4a",".mp4",".webm",".mov"}
 IMAGE_EXT={".jpg",".jpeg",".png",".gif",".svg",".webp"}
 FONT_EXT={".woff",".woff2",".ttf",".otf",".eot"}
@@ -323,6 +323,8 @@ class H(BaseHTTPRequestHandler):
                   "range="+str(self.headers.get("Range")),r["key"],path)
             return self.sendfile(f,ct)
         b=f.read_bytes()
+        if ext in DOC_EXT or '/files/' in path:
+            return self.sendb(b,ct,extra={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(Path(unquote(path)).name,safe='')})
         if mime.startswith("text/") or mime in TEXT or "javascript" in mime:
             try:
                 b=rewrite(b)

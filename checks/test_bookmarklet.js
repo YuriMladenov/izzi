@@ -50,4 +50,18 @@ async function images(){
  assert.equal(failed.failed,2);assert.equal(events.filter(x=>x.kind==='image-failed').length,2);
  assert(events.some(x=>x.extra.reason==='няма годен body в архива'));
 }
-(async()=>{await images();await run(false);await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});
+async function attachments(){
+ const helper=source.slice(source.indexOf('async function captureLessonFiles'),source.indexOf('const probe='));
+ const lesson=new URL('https://bg.izzi.digital/DOS/128031/8.html'),requested=[],events=[];
+ const links=['./datastore/15/publication/128031/files/cParts.exe','./datastore/15/publication/128031/files/inpDevices.sb3?v=1782308254','javascript:alert(1)'];
+ const frame={contentDocument:{baseURI:lesson.href,querySelectorAll:()=>links.map(href=>({getAttribute:()=>href})),documentElement:{outerHTML:''}},contentWindow:{fetch:async(url,options)=>{requested.push(new URL(url));assert.equal(options.mode,'no-cors');return {blob:async()=>({})};}}};
+ let saved=true;
+ const capture=vm.runInNewContext(helper+';captureLessonFiles',{O:lesson.origin,document:{createElement:()=>({innerHTML:'',value:''})},URL,URLSearchParams,AbortController,console:{warn:()=>{}},setTimeout:(f,ms)=>{if(ms===500)queueMicrotask(f);return 1;},clearTimeout:()=>{},fetch:async()=>({ok:true,json:async()=>({available:saved})})});
+ const result=await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}));
+ assert.equal(result.total,2);assert.equal(result.failed,0);assert.equal(requested.length,2);
+ assert.equal(requested[1].searchParams.get('v'),'1782308254');assert(requested[0].pathname.startsWith('/DOS/128031/datastore/'));
+ saved=false;events.length=0;
+ assert.equal((await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}))).failed,2);
+ assert.equal(events.filter(x=>x.kind==='file-failed').length,2);
+}
+(async()=>{await attachments();await images();await run(false);await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});

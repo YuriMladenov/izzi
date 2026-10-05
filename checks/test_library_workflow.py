@@ -207,6 +207,17 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertIn('https://bg.izzi.digital/DOS/1/missing.png?__izzi_offline_recover=',text)
         self.assertEqual(4,text.count('>Изтегли</a>'))
         self.assertIn('rel="noopener noreferrer"',text)
+    def test_attachment_replay_preserves_bytes_and_forces_download(self):
+        bodies={'exe':b'MZbinary\x00file','sb3':b'PK\x03\x04scratch-fixture'}
+        for ext,body in bodies.items():self.add('/DOS/1/datastore/15/publication/1/files/demo.'+ext,body,content_type='application/octet-stream')
+        self.add('/DOS/1/datastore/15/publication/1/files/bad.sb3',b'<html>login</html>',content_type='text/html')
+        self.start_server()
+        for ext,body in bodies.items():
+            code,headers,result=self.request('/DOS/1/datastore/15/publication/1/files/demo.'+ext+'?v=123')
+            self.assertEqual(code,200);self.assertEqual(result,body)
+            self.assertIn('attachment;',headers['Content-Disposition'])
+        self.assertEqual(self.request('/DOS/1/datastore/15/publication/1/files/bad.sb3')[0],404)
+
     def test_operations_local_control_and_fixed_actions(self):
         import operations
         self.start_server()

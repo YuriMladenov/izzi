@@ -216,6 +216,12 @@ Iframe е 1280 × 900 px за desktop layout; визуално е намален
 
 Нужни са обновеният capture addon и обновеният Firefox bookmark; спрете и стартирайте отново capture след обновяване. Започнете с проблемния урок 1408780 и проверете image-failed и readiness след обхода. Целта е потвърдено зареждане и записване на всички открити изображения, а не безусловен успех: origin 404, timeout и блокирани ресурси се показват като пропуски. Изображения, появяващи се само след непосетени интеракции, не могат да се открият предварително. Видеата продължават да изискват отделна проверка.
 
+### Прикачени файлове при обход
+
+След изображенията bookmarklet записва прикачените файлове от lesson links и вложените HTML links в конфигурациите. Поддържа IZZI `/files/` адреси и познати download формати, включително `.exe`, Scratch `.sb3`/`.sb2`, архиви и документи. Използва browser fetch с нормалната сесия и recovery marker, изчаква и проверява архива, с два опита и лимит 120 секунди за опит. Не изпълнява файловете и не ги стартира като приложения.
+
+`files-checked` и `file-failed` се показват в capture session report. Непотвърден файл прави lesson traversal непълен. Capture има съществуващ лимит 250 MiB на body; по-големи файлове няма да бъдат потвърдени. Линкове, които се появяват само след непосетена интеракция, остават за ръчна проверка. Запазените файлове се свалят от локалната библиотека с download header; `.exe` и `.sb3` се броят като документи. Обновете capture/replay файловете и Firefox bookmark преди нов обход.
+
 ## Подреждане, преименуване и скриване
 
 На страницата на учебника изберете **Подреди / преименувай / скрий**. Задайте номера в колоната „Ред“ (по-малкият е по-рано), редактирайте името и отметнете „Скрит“ за ненужните страници. Натиснете „Запази“. Скритите уроци остават достъпни в редактора, където можете да ги покажете отново.
@@ -250,7 +256,7 @@ Readiness може да завърши с грешка за непълен ли�
 | Команда | Предназначение |
 | --- | --- |
 | `checks\validate_replay.bat` | 22 synthetic HTTP проверки; не валидира личния архив |
-| `checks\test_library_workflow.bat` | 25 regression теста с временни данни |
+| `checks\test_library_workflow.bat` | 26 regression теста с временни данни |
 | `checks\test_media_contract.bat` | Media mapping/server API contract |
 | `checks\final_readiness_report.bat`, `checks\book_readiness_report.bat` | Пълнота на текущия archive/state |
 | `checks\missing_assets_report.bat` | Известни пропуски и origin 404 warnings |
@@ -321,7 +327,7 @@ Media shim премахва невалидни `#`/lesson HTML sources и наб
 .venv/bin/python checks/test_replay_html.py
 ```
 
-Последната проверка: 22 HTTP + 25 workflow + 13 HTML/runtime теста са успешни; четири runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
+Последната проверка: 22 HTTP + 26 workflow + 13 HTML/runtime теста са успешни; четири runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
 
 ## История на версиите
 
