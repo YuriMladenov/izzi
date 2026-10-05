@@ -207,6 +207,27 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertIn('https://bg.izzi.digital/DOS/1/missing.png?__izzi_offline_recover=',text)
         self.assertEqual(4,text.count('>Изтегли</a>'))
         self.assertIn('rel="noopener noreferrer"',text)
+    def test_webui_assets_help_and_empty_library(self):
+        self.start_server()
+        page=self.request('/')[2].decode()
+        self.assertIn('lang="bg"',page);self.assertIn('Библиотеката е празна',page)
+        self.assertIn('/__ui__/app.css',page);self.assertIn('/__ui__/app.js',page)
+        for path,mime in [('/__ui__/app.css','text/css'),('/__ui__/app.js','application/javascript')]:
+            code,headers,body=self.request(path)
+            self.assertEqual(code,200);self.assertTrue(headers['Content-Type'].startswith(mime));self.assertTrue(body)
+        self.assertIn('capture_mode.bat',self.request('/__help__')[2].decode())
+        # UI assets stay available when private archive state is malformed.
+        (self.state/'url_map.json').write_text('{broken')
+        self.assertEqual(self.request('/__ui__/app.css')[0],200)
+
+    def test_webui_journal_shows_counts_without_private_bodies(self):
+        progress_journal.append(self.state/'progress','POST','/api/sync','http://localhost/DOS/1/9.html',b'{"secret":"PRIVATE_BODY"}','application/json')
+        self.start_server()
+        code,_,body=self.request('/__journal__')
+        self.assertEqual(code,200)
+        page=body.decode();self.assertIn('POST /api/sync',page);self.assertNotIn('PRIVATE_BODY',page)
+        self.assertIn('aria-current="page"',page)
+
     def test_download_status_checks_actual_archive_and_rejects_external_host(self):
         self.add('/datastore/test.png',b'\x89PNGfixture',content_type='image/png')
         self.start_server()

@@ -2,6 +2,18 @@
 
 Локална библиотека за архивирани IZZI уроци: Firefox capture proxy, HAR import, offline replay, MP4 byte-range assembly, отчети и диагностика. Това е общото ръководство за v3.4.2 и последващите поправки; историята на по-старите версии е в края.
 
+## WebUI
+
+След `start_library.bat` отворете `http://127.0.0.1:8765/` или LAN адреса на компютъра. WebUI работи с локални CSS/JavaScript файлове, без CDN, интернет fonts или допълнителен frontend server. Оригиналните архивирани уроци се отварят от съществуващите replay адреси.
+
+- **Библиотека:** карти с имена, book IDs и реални archive броячи; търсене по име и ID.
+- **Учебник:** подреден списък с търсене и редактор за имена, ред и скриване.
+- **Липсващи ресурси:** търсене по адрес, индивидуално/общо изтегляне, спиране и статус. Capture proxy остава нужен за архивиране.
+- **Локален журнал:** броячи по book и endpoint, без показване на private request bodies.
+- **Помощ:** capture, проверки, подреждане, обновяване и LAN инструкции.
+
+Изгледът е responsive за компютър и телефон. Без JavaScript основната навигация и server-rendered списъците остават достъпни; търсенето и общото изтегляне изискват JavaScript. `webui.py` изгражда общия HTML shell; `webui/app.css` и `webui/app.js` обслужват изгледа и търсенето. WebUI не стартира BAT команди на компютъра и не заменя Firefox capture workflow.
+
 ## Как работи проектът
 
 Проектът има два основни режима. **Capture** записва отговорите, които Firefox получава от IZZI при нормална работа с оригиналния сайт. **Локална библиотека** използва тези файлове и ги предоставя през локален HTTP сървър, за да се отварят уроци без интернет. Capture трябва да се направи предварително; обновяването на програмата от GitHub не изтегля учебници.
@@ -105,7 +117,7 @@ Addon пази bodies в `archive`, URL записи в `state/url_map.json`, к
 
 Вторият вариант изпълнява само четирите synthetic/contract suites и не проверява личния архив. Общият runner не стартира capture, import, repair, reset, recovery или Git update. HTTP probes минават през обичайния server и могат да допълнят missing log при пропуски. Индивидуалните инструменти остават в `checks/`.
 
-След края BAT запазва exit code: 0 при липса на FAILED проверки, 1 при неуспех. Пауза има само накрая. При информационни reports `OK` означава, че script е изпълнен; четете и неговите броячи. SKIPPED не означава успешно проверена медия. HTML/runtime suite изисква Node.js за три теста; без него те са пропуснати.
+След края BAT запазва exit code: 0 при липса на FAILED проверки, 1 при неуспех. Пауза има само накрая. При информационни reports `OK` означава, че script е изпълнен; четете и неговите броячи. SKIPPED не означава успешно проверена медия. HTML/runtime suite изисква Node.js за четири теста; без него те са пропуснати.
 
 ## Firefox bookmarklet файлове
 
@@ -234,7 +246,7 @@ Readiness може да завърши с грешка за непълен ли�
 | Команда | Предназначение |
 | --- | --- |
 | `checks\validate_replay.bat` | 22 synthetic HTTP проверки; не валидира личния архив |
-| `checks\test_library_workflow.bat` | 21 regression теста с временни данни |
+| `checks\test_library_workflow.bat` | 23 regression теста с временни данни |
 | `checks\test_media_contract.bat` | Media mapping/server API contract |
 | `checks\final_readiness_report.bat`, `checks\book_readiness_report.bat` | Пълнота на текущия archive/state |
 | `checks\missing_assets_report.bat` | Известни пропуски и origin 404 warnings |
@@ -305,7 +317,7 @@ Media shim премахва невалидни `#`/lesson HTML sources и наб
 .venv/bin/python checks/test_replay_html.py
 ```
 
-Последната проверка: 22 HTTP + 21 workflow + 12 HTML/runtime теста са успешни; три runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
+Последната проверка: 22 HTTP + 23 workflow + 13 HTML/runtime теста са успешни; четири runtime теста използват Node.js. Тестовете работят с временни synthetic данни, не с личния archive/state. Chromium проверката изтече по timeout преди достигане на test server; browser rendering не е потвърдено за всички последващи поправки. Потребителят потвърди Windows offline video/seek/navigation и възстановена PNG; конкретните липсващи lesson bodies остават за локална диагностика.
 
 ## История на версиите
 

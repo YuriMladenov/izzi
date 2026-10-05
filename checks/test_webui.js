@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+const input={value:'',addEventListener(kind,f){this[kind]=f;}},count={},empty={};
+const items=[{textContent:'Компютърно моделиране ID 1408736'},{textContent:'Математика ID 12'}];
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../webui/app.js'),'utf8'),{document:{getElementById:id=>({'ui-search':input,'ui-count':count,'ui-no-results':empty}[id]),querySelectorAll:()=>items}});
+assert.equal(count.textContent,'2 / 2');assert.equal(empty.hidden,true);
+input.value='КОМПЮТЪРНО';input.input();assert.equal(items[0].hidden,false);assert.equal(items[1].hidden,true);
+input.value='12';input.input();assert.equal(items[0].hidden,true);assert.equal(items[1].hidden,false);
+input.value='няма';input.input();assert.equal(count.textContent,'0 / 2');assert.equal(empty.hidden,false);
+input.value='';input.input();assert(items.every(x=>!x.hidden));
+console.log('PASS WebUI search: Bulgarian case, IDs, empty results and reset.');

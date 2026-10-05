@@ -8,6 +8,7 @@ from media_mapping import lesson_media
 from assembled_media import resolve as resolve_assembled
 import progress_journal
 import library_catalog
+import webui
 from import_har import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
@@ -332,6 +333,12 @@ class H(BaseHTTPRequestHandler):
 
     def route(self):
         p=urlparse(self.path)
+        if p.path in ('/__ui__/app.css','/__ui__/app.js'):
+            filename=p.path.rsplit('/',1)[1]
+            return self.sendb((webui.ASSETS/filename).read_bytes(),'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
+        if p.path=='/__help__':
+            content='<h1>Как да използвам библиотеката</h1><h2>1. Запиши съдържание</h2><p>На компютъра с архива стартирай capture_mode.bat. Настрой Firefox proxy към 127.0.0.1:8877 и отвори оригиналния учебник с нормален login. Включи Disable Cache. Използвай обновения bookmarklet за избрания срок или раздел.</p><h2>2. Провери и подреди</h2><p>Изпълни run_all_checks.bat. Отвори учебника в библиотеката и избери „Подреди / преименувай / скрий“ за локални настройки.</p><h2>3. Възстанови ресурси</h2><p>От „Липсващи ресурси“ използвай „Изтегли“ или „Изтегли всички“ при интернет и активен capture proxy. След края презареди списъка.</p><h2>Достъп от локалната мрежа</h2><p>От друго устройство отвори http://&lt;IPv4 на компютъра&gt;:8765/. Firewall трябва да допуска порт 8765 в Private мрежата. Няма login защита; използвай доверена мрежа.</p><h2>Обновяване</h2><p>Спри capture и сървъра, запази резервно копие на archive/state и пусни update_project.bat. Стартирай сървъра отново. При нов bookmarklet обнови и адреса на Firefox bookmark.</p>'
+            return self.sendb(webui.page(content,'Помощ','help').encode(),'text/html; charset=utf-8')
         try:
             m=load_archive_state(URL_MAP_FILE,{});books=load_archive_state(BOOKS_FILE,{})
             if not isinstance(m,dict) or not isinstance(books,dict):raise ValueError('invalid state root')
@@ -343,9 +350,10 @@ class H(BaseHTTPRequestHandler):
             for bid,b in sorted(books.items()):
                 st=resource_stats(m,bid);pr=progress_summary(bid);known,available=page_counts(m,bid,b)
                 info='%d известни страници · %d с наличен HTML · %d документа · %d медия · %d изображения · %d локални записи'%(known,available,st["documents"],st["media"],st["images"],pr)
-                items.append('<li><a href="/__book__/%s"><b>%s</b></a><br><small>ID %s · %s</small></li>'%(bid,html.escape(b.get("title","Учебник "+bid)),bid,html.escape(info)))
-            page='<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><title>IZZI Offline Library</title><h1>IZZI Offline Library</h1><p><a href="/__missing__">Текущи липсващи ресурси</a></p><p>Книгите се различават по ID; еднаквите заглавия не се сливат.</p><ul>'+''.join(items)+'</ul>'
-            return self.sendb(page.encode(),"text/html; charset=utf-8")
+                items.append('<li data-search-item><a href="/__book__/%s"><b>%s</b></a><br><small>ID %s · %s</small></li>'%(bid,html.escape(b.get("title","Учебник "+bid)),bid,html.escape(info)))
+            page='<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><title>IZZI Offline Library</title><h1>Библиотека</h1><p><a href="/__missing__">Текущи липсващи ресурси</a></p><p>Книгите се различават по ID; еднаквите заглавия не се сливат.</p><ul class="book-grid">'+''.join(items)+'</ul>'
+            if not items:page+='<section class="empty"><h2>Библиотеката е празна</h2><p>Запиши първия си урок чрез capture или импортирай HAR файл. Тук ще се появят учебниците от твоя архив.</p><a href="/__help__">Как да започна →</a></section>'
+            return self.sendb(webui.page(page,search=bool(items)).encode(),"text/html; charset=utf-8")
         if p.path.startswith("/__book__/"):
             bid=p.path.split("/")[-1];b=books.get(bid)
             if not b:return self.sendb(b"Unknown book","text/plain",404)
@@ -361,10 +369,13 @@ class H(BaseHTTPRequestHandler):
                     lid=html.escape(x['id'],quote=True)
                     rows.append('<tr><td>%s</td><td><input type="number" name="order_%s" value="%d" required></td><td><input name="name_%s" value="%s" maxlength="300"></td><td><input type="checkbox" name="hidden_%s" %s></td></tr>'%(lid,lid,index,lid,html.escape(x['title'],quote=True),lid,'checked' if x['hidden'] else ''))
                 page='<!doctype html><meta charset="utf-8"><h1>Подреждане на уроци</h1><p>По-малкият номер се показва по-рано. Скриването запазва архивираните файлове и директните адреси на уроците.</p><form method="post" action="/__catalog__/%s"><table><tr><th>ID</th><th>Ред</th><th>Име</th><th>Скрит</th></tr>%s</table><button>Запази</button></form><p><a href="/__book__/%s">Назад</a></p>'%(html.escape(bid),''.join(rows),html.escape(bid))
-                return self.sendb(page.encode(),'text/html; charset=utf-8')
-            items=''.join('<li><a href="%s">%s</a> <small>(%s)</small></li>'%(html.escape(x["path"]),html.escape(x["title"]),html.escape(x["id"])) for x in ls if not x['hidden'])
+                page=page.replace('<table>','<div class="table-wrap"><table>').replace('</table>','</table></div>')
+                return self.sendb(webui.page(page,'Подреждане').encode(),'text/html; charset=utf-8')
+            items=''.join('<li data-search-item><a href="%s">%s</a> <small>(%s)</small></li>'%(html.escape(x["path"]),html.escape(x["title"]),html.escape(x["id"])) for x in ls if not x['hidden'])
             known,available=page_counts(m,bid,b)
-            return self.sendb(('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a> · <a href="?edit=1">Подреди / преименувай / скрий</a></p><ol>%s</ol>'%(html.escape(b["title"]),html.escape(bid),known,available,items)).encode(),"text/html; charset=utf-8")
+            content='<h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a> · <a class="download" href="?edit=1">Подреди / преименувай / скрий</a></p><ol class="lesson-list">%s</ol>'%(html.escape(b["title"]),html.escape(bid),known,available,items)
+            if not items:content+='<p class="empty">Няма показани уроци. Провери скритите страници в редактора.</p>'
+            return self.sendb(webui.page(content,'Уроци',search=bool(items)).encode(),"text/html; charset=utf-8")
         if p.path=="/__offline__/gtag.js":
             return self.sendb(b"window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){window.dataLayer.push(arguments);};","application/javascript")
         if p.path=="/__offline__/youtube-api.js":
@@ -376,6 +387,15 @@ class H(BaseHTTPRequestHandler):
             ext=Path(target.path).suffix.lower()
             record=find(m,target.hostname,target.path,target.query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
             return self.sendb(json.dumps({'available':bool(record)}).encode(),'application/json')
+        if p.path=='/__journal__':
+            summary=progress_journal.summarize(PROGRESS_DIR)
+            content='<h1>Локален журнал</h1><p>Записани заявки: %d · Невалидни редове: %d</p><p>Журналът пази локални заявки; това не е възстановен прогрес от оригиналния сървър. Тук се показват само броячи.</p>'%(summary['records'],summary['invalid_lines'])
+            for book in summary['books']:
+                content+='<h2>Учебник %s</h2><div class="table-wrap"><table><tr><th>Заявка</th><th>Брой</th></tr>'%html.escape(str(book['book']))
+                for endpoint,count in book['endpoints'].items():content+='<tr><td>%s</td><td>%d</td></tr>'%(html.escape(endpoint),count)
+                content+='</table></div>'
+            if not summary['books']:content+='<p class="empty">Все още няма локални записи.</p>'
+            return self.sendb(webui.page(content,'Журнал','journal').encode(),'text/html; charset=utf-8')
         if p.path=="/__offline__/progress":
             return self.sendb(json.dumps(progress_journal.summarize(PROGRESS_DIR),ensure_ascii=False).encode(),"application/json")
         if p.path.startswith("/__offline__/external-media/"):
@@ -399,13 +419,14 @@ class H(BaseHTTPRequestHandler):
                     if _izzi_host(original.hostname) and not original.username and not original.password:
                         target='https://'+url+'?__izzi_offline_recover='+marker
                         action=' <a class="download" href="%s" target="_blank" rel="noopener noreferrer">Изтегли</a>'%html.escape(target,quote=True)
-                    rendered.append('<li>%s <code>%s</code>%s</li>'%(label,html.escape(url),action))
+                    rendered.append('<li data-search-item>%s <code>%s</code>%s</li>'%(label,html.escape(url),action))
                 return ''.join(rendered)
             page='<!doctype html><meta charset="utf-8"><h1>Текущи липсващи ресурси (%d)</h1><p>Възстановени от историческия лог: %d. Логът е запазен.</p><ul>%s</ul><h2>Предупреждения (%d)</h2><ul>%s</ul>'%(len(missing),resolved,rows(missing),len(warnings),rows(warnings))
             page=page.replace('<h1>', '<style>.download{display:inline-block;padding:5px 10px;margin:4px;border:1px solid #567;border-radius:4px;text-decoration:none}li{margin:8px 0;overflow-wrap:anywhere}</style><p><a href="/">← Библиотека</a></p><p>„Изтегли“ отваря оригиналния ресурс в нов таб. За запис в архива използвай интернет и Firefox с включен capture proxy и Disable Cache. След зареждане се върни тук и презареди списъка. При достъп през LAN записването трябва да минава през capture proxy на компютъра с библиотеката. Origin 404 може да остане недостъпен.</p><h1>',1)
             page+='<p><button id="download-all">Изтегли всички</button> <button id="download-stop" disabled>Спри</button></p><p id="download-status" role="status">Изтеглянето включва ресурсите от списъка и предупрежденията. Origin 404 може да остане недостъпен.</p>'
             page+='<script>'+Path(__file__).with_name('missing_download.js').read_text(encoding='utf-8')+'</script>'
-            return self.sendb(page.encode(),"text/html; charset=utf-8")
+            page=re.sub(r'<style>.*?</style>','',page,flags=re.S).replace('<ul>','<ul class="resource-list">')
+            return self.sendb(webui.page(page,'Липсващи ресурси','missing',search=bool(missing or warnings)).encode(),"text/html; charset=utf-8")
         if p.path.startswith("/__host__/"):
             rest=p.path[len("/__host__/"):]
             if "/" not in rest:return self.sendb(b"Bad route","text/plain",400)
