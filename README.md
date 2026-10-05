@@ -74,7 +74,7 @@ Addon пази bodies в `archive`, URL записи в `state/url_map.json`, к
 
 ### `update_project.bat` — GitHub обновяване
 
-Изисква Git checkout, branch `main` и липса на локални промени или неигнорирани untracked файлове. Показва напомняне да спрете capture/server и след пауза изпълнява `git pull --ff-only origin main`. При конфликт, divergent история или локални промени спира; не използва reset/clean. Накрая показва последния commit.
+Изисква Git checkout, branch `main` или `WebUI` и липса на локални промени или неигнорирани untracked файлове. Показва напомняне да спрете capture/server и след пауза изпълнява `git pull --ff-only origin <текущия клон>`. При конфликт, divergent история или локални промени спира; не използва reset/clean. Накрая показва последния commit.
 
 Архивът и state са игнорирани от Git и не се изтеглят от GitHub. Запазвайте ги с отделно резервно копие. При инсталация само от ZIP този BAT няма да работи без Git checkout. След обновяване стартирайте отново сървъра, а при промяна на bookmarklet — обновете и запазения Firefox bookmark.
 
@@ -172,7 +172,7 @@ cd izzi
 
 За capture изпълнете `install_capture.bat` (използва `requirements-capture.txt`). Локалният replay не изисква работещ capture proxy. `requirements.txt` съдържа пояснения, а не pip списък.
 
-При обновяване спрете capture и replay процесите, запазете резервно копие на `archive` и `state`, след което изпълнете `update_project.bat` или `git pull --ff-only origin main`. BAT файлът изисква branch `main` и чист working tree; при локални промени спира, без reset/clean. При обновяване от ZIP запазете съществуващите `archive` и `state` до `server.py`. Не смесвайте данните от различни инсталационни папки.
+При обновяване спрете capture и replay процесите, запазете резервно копие на `archive` и `state`, след което изпълнете `update_project.bat` или `git pull --ff-only origin WebUI` за клона WebUI. BAT файлът изисква branch `main` или `WebUI` и чист working tree; при локални промени спира, без reset/clean. При обновяване от ZIP запазете съществуващите `archive` и `state` до `server.py`. Не смесвайте данните от различни инсталационни папки.
 
 ## Достъп от локалната мрежа
 

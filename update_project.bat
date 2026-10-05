@@ -16,8 +16,8 @@ if errorlevel 1 (
 
 set "IZZI_UPDATE_BRANCH="
 for /f "delims=" %%B in ('git branch --show-current') do set "IZZI_UPDATE_BRANCH=%%B"
-if not "%IZZI_UPDATE_BRANCH%"=="main" (
-    echo ERROR: Updates require the main branch. No changes were made.
+if not "%IZZI_UPDATE_BRANCH%"=="main" if not "%IZZI_UPDATE_BRANCH%"=="WebUI" (
+    echo ERROR: Updates require main or WebUI. No changes were made.
     goto failed
 )
 
@@ -39,7 +39,8 @@ echo Stop the replay server and capture proxy before updating.
 echo The update uses fast-forward only. It does not reset or clean your files.
 pause
 
-git pull --ff-only origin main
+echo Updating branch %IZZI_UPDATE_BRANCH%...
+git pull --ff-only origin "%IZZI_UPDATE_BRANCH%"
 if errorlevel 1 (
     echo ERROR: Update failed. Read the Git message above.
     goto failed
