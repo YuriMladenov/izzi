@@ -366,10 +366,10 @@ class H(BaseHTTPRequestHandler):
             for bid,b in sorted(books.items()):
                 st=resource_stats(m,bid);pr=progress_summary(bid);known,available=page_counts(m,bid,b)
                 info='%d известни страници · %d с наличен HTML · %d документа · %d медия · %d изображения · %d локални записи'%(known,available,st["documents"],st["media"],st["images"],pr)
-                items.append('<li data-search-item><a href="/__book__/%s"><b>%s</b></a><br><small>ID %s · %s</small></li>'%(bid,html.escape(b.get("title","Учебник "+bid)),bid,html.escape(info)))
-            page='<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><title>IZZI Offline Library</title><h1>Библиотека</h1><p><a href="/__missing__">Текущи липсващи ресурси</a></p><p>Книгите се различават по ID; еднаквите заглавия не се сливат.</p><ul class="book-grid">'+''.join(items)+'</ul>'
+                items.append(webui.book_card(bid,b.get('title','Учебник '+bid),info,available))
+            page='<ul class="book-grid">'+''.join(items)+'</ul>'
             if not items:page+='<section class="empty"><h2>Библиотеката е празна</h2><p>Запиши първия си урок чрез capture или импортирай HAR файл. Тук ще се появят учебниците от твоя архив.</p><a href="/__help__">Как да започна →</a></section>'
-            return self.sendb(webui.page(page,search=bool(items)).encode(),"text/html; charset=utf-8")
+            return self.sendb(webui.page(page,search=bool(items),catalog=True).encode(),"text/html; charset=utf-8")
         if p.path.startswith("/__book__/"):
             bid=p.path.split("/")[-1];b=books.get(bid)
             if not b:return self.sendb(b"Unknown book","text/plain",404)

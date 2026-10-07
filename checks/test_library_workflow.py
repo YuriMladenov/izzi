@@ -297,7 +297,7 @@ class LibraryWorkflow(unittest.TestCase):
             '2':{'title':'Same title','lessons':{'20':{'id':'20','path':'/DOS/2/20.html','title':'Page'}}}})
         self.add('/DOS/1/10.html')
         self.start_server();text=self.request('/')[2].decode()
-        self.assertEqual(2,text.count('<b>Same title</b>'))
+        self.assertEqual(2,text.count('<h3>Same title</h3>'))
         self.assertIn('ID 1',text);self.assertIn('ID 2',text)
         self.assertIn('1 с наличен HTML',text);self.assertIn('0 с наличен HTML',text)
         self.assertIn('data:,',text)
