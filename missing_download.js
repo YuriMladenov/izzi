@@ -11,14 +11,15 @@ try{
 for(const target of urls){
 if(cancelled)break;
 status.textContent='Зареждане '+(completed+1)+' / '+urls.length;
-controller=new AbortController();const timer=setTimeout(()=>controller.abort(),30000);
+const media=/\.(mp4|mp3|webm|ogg|m4a|wav)$/i.test(new URL(target).pathname);
+controller=new AbortController();const timer=setTimeout(()=>controller.abort(),media?240000:30000);
 try{
 const original=new URL(target);original.searchParams.delete('__izzi_offline_recover');
 const request=new URL(target);request.searchParams.set('__izzi_offline_recover',Date.now().toString(36)+'_'+completed);
 const response=await fetch(request.href,{mode:'no-cors',credentials:'include',cache:'no-store',signal:controller.signal});
 await response.blob();
 let saved=false;
-for(let attempt=0;attempt<10&&!cancelled;attempt++){
+for(let attempt=0;attempt<(media?480:10)&&!cancelled;attempt++){
 const result=await fetch('/__offline__/asset-status?'+new URLSearchParams({url:original.href}),{cache:'no-store',signal:controller.signal});
 if(!result.ok)throw new Error('Проверката на архива не успя');
 if((await result.json()).available){saved=true;break;}

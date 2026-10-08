@@ -35,7 +35,9 @@ def usable_body(r,archive,ext=''):
     if ext in {'.woff','.woff2','.ttf','.otf'}:
         with blob.open('rb') as stream:magic=stream.read(4)
         if magic not in (b'wOF2',b'wOFF',b'OTTO',b'\x00\x01\x00\x00',b'ttcf',b'true'):return False
-    if ext in {'.svg','.png','.jpg','.jpeg','.webp','.gif','.exe','.sb','.sb2','.sb3','.zip','.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx'}:
+    if ext in {'.mp4','.mp3','.webm','.ogg','.m4a','.wav'} and str(r.get('content_type','')).split(';')[0].lower() in ('text/html','application/json'):
+        return False
+    if ext in {'.mp4','.mp3','.webm','.ogg','.m4a','.wav','.svg','.png','.jpg','.jpeg','.webp','.gif','.exe','.sb','.sb2','.sb3','.zip','.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx'}:
         with blob.open('rb') as stream:header=stream.read(1024)
         if not header or re.search(br'<(?:!doctype\s+html|html)\b',header,re.I):return False
     if ext in {'.exe','.sb3','.sb2'}:
@@ -74,14 +76,33 @@ def _canon_path(path):
             return tail
     return path
 
+def lesson_book(path):
+    match=re.match(r'^/DOS/(\d+)(?:/|$)',unquote(path))
+    return match.group(1) if match else None
+
+def publication_ids(path):
+    return set(re.findall(r'/publication/(\d+)(?:/|$)',unquote(path)))
+
 def book_ids(path):
-    return set(re.findall(r'(?:^/DOS/|/publication/)(\d+)(?:/|$)',unquote(path)))
+    # /DOS identifies the lesson owner. /publication identifies the asset's
+    # namespace, which may be an older or shared publication, not that owner.
+    owner=lesson_book(path)
+    return {owner} if owner else publication_ids(path)
+
+def belongs_to_lesson(path,book):
+    owner=lesson_book(path)
+    return owner is None or owner==str(book)
 
 def compatible_books(requested,candidate,book=None):
-    wanted=book_ids(requested)
-    if book:wanted.add(str(book))
-    found=book_ids(candidate)
-    return len(wanted)<=1 and len(found)<=1 and (not wanted or not found or wanted==found)
+    wanted=lesson_book(requested)
+    found=lesson_book(candidate)
+    if book:
+        if wanted and wanted!=str(book):return False
+        wanted=str(book)
+    if wanted and found and wanted!=found:return False
+    requested_publications=publication_ids(requested)
+    candidate_publications=publication_ids(candidate)
+    return not requested_publications or not candidate_publications or requested_publications==candidate_publications
 
 def find(m,host,path,q,usable=None,book=None):
     """Resolve from the URL map itself.

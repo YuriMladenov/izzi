@@ -222,6 +222,7 @@ def current_missing(events,mapping):
     missing=[];warnings=[];resolved=0;seen=set()
     for event in events:
         host=event.get('host',SOURCE_HOST);path=event.get('path','/');query=event.get('query','')
+        if path.startswith('/__offline_capture__/'):continue
         key=(host,tuple(sorted(book_ids(path))),_canon_path(path))
         if key in seen:continue
         seen.add(key);ext=Path(path).suffix.lower()
@@ -271,6 +272,8 @@ class H(BaseHTTPRequestHandler):
         if self.command!="HEAD":self.wfile.write(f.read_bytes())
 
     def archive(self,m,host,path,q):
+        if _izzi_host(host) and path.startswith('/__offline_capture__/'):
+            return self.sendb(b'{"capture":false,"available":false}','application/json')
         context=book_ids(urlparse(self.headers.get("Referer","")).path)
         # Explicit book URLs remain navigable from another book's page.
         # Referer scope is only needed for paths that carry no book identity.
@@ -447,6 +450,9 @@ class H(BaseHTTPRequestHandler):
             page+='<script>'+Path(__file__).with_name('missing_download.js').read_text(encoding='utf-8')+'</script>'
             page=re.sub(r'<style>.*?</style>','',page,flags=re.S).replace('<ul>','<ul class="resource-list">')
             return self.sendb(webui.page(page,'Липсващи ресурси','missing',search=bool(missing or warnings)).encode(),"text/html; charset=utf-8")
+        if p.path.startswith('/__offline_capture__/'):
+            # Capture probes belong to the proxy, never to the archived site.
+            return self.sendb(b'{"capture":false,"available":false}','application/json')
         if p.path.startswith("/__host__/"):
             rest=p.path[len("/__host__/"):]
             if "/" not in rest:return self.sendb(b"Bad route","text/plain",400)

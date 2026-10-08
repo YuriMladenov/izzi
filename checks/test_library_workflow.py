@@ -326,8 +326,42 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertEqual(b'book one',self.request('/DOS/1/profil/app.js',headers={'Referer':self.base+'/DOS/2/20.html'})[2])
         self.add('/DOS/2/20.html',b'<html>second book</html>')
         self.assertIn(b'second book',self.request('/DOS/2/20.html',headers={'Referer':self.base+'/DOS/1/10.html'})[2])
+    def test_older_publication_assets_replay_under_new_lesson_book(self):
+        self.write('books.json',{'412693':{'title':'География','lessons':{'10':{'id':'10','path':'/DOS/412693/10.html','title':'Урок'}}}})
+        source='/datastore/15/publication/3931/video/test.mp4'
+        self.add(source,b'full older video',content_type='video/mp4')
+        url='https://bg.izzi.digital'+source
+        self.assertTrue(media_mapping.add_media(url,'https://bg.izzi.digital/DOS/412693/10.html'))
+        self.assertEqual(url,media_mapping.lesson_media('412693','10')[0]['url'])
+        picture='/DOS/412693/datastore/15/publication/3931/pictures/test.png'
+        self.add(picture,b'\x89PNG\r\n\x1a\nold image',content_type='image/png')
+        self.start_server()
+        request='/DOS/412693'+source
+        self.assertEqual(b'full older video',self.request(request)[2])
+        code,headers,body=self.request(request,headers={'Range':'bytes=0-3'})
+        self.assertEqual(206,code);self.assertEqual(b'full',body);self.assertEqual('bytes 0-3/16',headers['Content-Range'])
+        self.assertEqual(200,self.request(picture)[0])
+        target='https://bg.izzi.digital'+request
+        status=json.loads(self.request('/__offline__/asset-status?url='+urllib.parse.quote(target,safe=''))[2])
+        self.assertTrue(status['available'])
+        self.assertEqual([],self.report()['bad_mapping'])
+        before=(self.state/'missing_resources.jsonl').read_text() if (self.state/'missing_resources.jsonl').exists() else ''
+        probe=json.loads(self.request('/__offline_capture__/image_status')[2])
+        self.assertFalse(probe['capture'])
+        after=(self.state/'missing_resources.jsonl').read_text() if (self.state/'missing_resources.jsonl').exists() else ''
+        self.assertEqual(before,after)
+
+    def test_video_login_page_is_not_reported_as_captured_media(self):
+        path='/datastore/15/publication/3931/video/login.mp4'
+        self.add(path,b'<html>Login required</html>',content_type='text/html')
+        self.start_server()
+        target=urllib.parse.quote('https://bg.izzi.digital'+path,safe='')
+        result=json.loads(self.request('/__offline__/asset-status?url='+target)[2])
+        self.assertFalse(result['available'])
+        self.assertEqual(404,self.request('/DOS/412693'+path)[0])
+
     def test_cross_book_media_is_not_mapped_or_injected(self):
-        wrong='https://bg.izzi.digital/datastore/15/publication/2/video/test.mp4'
+        wrong='https://bg.izzi.digital/DOS/2/datastore/15/publication/2/video/test.mp4'
         self.assertFalse(media_mapping.add_media(wrong,'https://bg.izzi.digital/DOS/1/10.html'))
         self.write('media_map.json',{'lessons':{'1/10':{'media':[{'url':wrong,'strict':True}]}}})
         self.assertEqual([],media_mapping.lesson_media('1','10'))

@@ -2,7 +2,7 @@ import json,re
 from urllib.parse import urlparse
 from config import STATE_DIR
 from active_lesson import get_active
-from replay_resolver import book_ids
+from replay_resolver import belongs_to_lesson
 
 P=STATE_DIR/"media_map.json"
 LESSON_RX=re.compile(r"/DOS/(\d+)/(\d+)\.html(?:$|[?#])")
@@ -33,7 +33,7 @@ def add_media(url,referer,request_headers=None):
     if not lesson:
         return False
     book,lid=lesson
-    if book_ids(urlparse(url).path)-{str(book)}:return False
+    if not belongs_to_lesson(urlparse(url).path,book):return False
     x=load(); lessons=x.setdefault("lessons",{})
     key=f"{book}/{lid}"
     e=lessons.setdefault(key,{"book":book,"lesson":lid,"media":[]})
@@ -55,4 +55,4 @@ def lesson_media(book,lid):
     e=load().get("lessons",{}).get(f"{book}/{lid}",{})
     return [i for i in e.get("media",[])
             if isinstance(i,dict) and i.get("url") and i.get("strict")
-            and not (book_ids(urlparse(i["url"]).path)-{str(book)})]
+            and belongs_to_lesson(urlparse(i["url"]).path,book)]

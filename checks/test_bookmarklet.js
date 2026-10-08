@@ -64,4 +64,19 @@ async function attachments(){
  assert.equal((await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}))).failed,2);
  assert.equal(events.filter(x=>x.kind==='file-failed').length,2);
 }
-(async()=>{await attachments();await images();await run(false);await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});
+async function media(){
+ const helper=source.slice(source.indexOf('async function captureLessonMedia'),source.indexOf('const probe='));
+ const lesson=new URL('https://bg.izzi.digital/DOS/412693/9.html'),requested=[],events=[];
+ const direct='https://bg.izzi.digital/DOS/412693/datastore/15/publication/3931/video/geo.mp4?v=17';
+ const config='/datastore/15/publication/4043/video/sun.mp4';
+ const frame={contentDocument:{baseURI:lesson.href,querySelectorAll:()=>[{src:direct,getAttribute:()=>null}],documentElement:{outerHTML:'<block-video src="'+config+'"></block-video>'}},contentWindow:{fetch:async(url,options)=>{requested.push(new URL(url));assert.equal(options.mode,'no-cors');assert.equal(options.credentials,'include');assert(!options.headers?.Range);return {blob:async()=>({})};}}};
+ let available=false,success=true;
+ const capture=vm.runInNewContext(helper+';captureLessonMedia',{O:lesson.origin,document:{createElement:()=>({set innerHTML(value){this.value=value;}})},URL,URLSearchParams,AbortController,console:{warn:()=>{}},setTimeout:(f,ms)=>{if(ms===500)queueMicrotask(f);return 1;},clearTimeout:()=>{},fetch:async(url)=>{const asset=new URL(url).searchParams.get('url');return {ok:true,json:async()=>({available:available||success&&requested.some(u=>u.origin+u.pathname===new URL(asset).origin+new URL(asset).pathname)})};}});
+ const result=await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}));
+ assert.equal(result.total,2);assert.equal(result.failed,0);assert.equal(requested.length,2);assert.equal(requested[0].searchParams.get('v'),'17');assert(requested.every(u=>u.searchParams.has('__izzi_offline_recover')));assert(events.some(e=>e.kind==='media-checked'));
+ available=true;requested.length=0;await capture(frame,lesson,async()=>{});assert.equal(requested.length,0,'usable archived media is not downloaded again');
+ available=false;success=false;requested.length=0;events.length=0;
+ assert.equal((await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}))).failed,2);
+ assert.equal(events.filter(e=>e.kind==='media-failed').length,2);
+}
+(async()=>{await media();await attachments();await images();await run(false);await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});

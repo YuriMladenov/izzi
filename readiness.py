@@ -3,7 +3,7 @@ import json
 import re
 from pathlib import Path
 from urllib.parse import urlparse
-from replay_resolver import find,book_ids,_izzi_host,usable_body
+from replay_resolver import find,book_ids,_izzi_host,usable_body,belongs_to_lesson
 
 LESSON=re.compile(r'^/DOS/(\d+)/(\d+)\.html$')
 IMPORTANT={'.html','.js','.mjs','.css','.json','.svg','.png','.jpg','.jpeg','.webp','.gif',
@@ -88,7 +88,7 @@ def assess(root):
             for row in entry.get('media',[]) if isinstance(entry,dict) else []:
                 if not isinstance(row,dict) or not row.get('strict') or not row.get('url'):continue
                 url=row['url']
-                if book_ids(urlparse(url).path)-{bid}:bad_mapping.append(url)
+                if not belongs_to_lesson(urlparse(url).path,bid):bad_mapping.append(url)
                 else:mapped.add(url)
         incomplete=[u for u in sorted(mapped) if not available(mapping,u,archive,bid,complete_media=Path(urlparse(u).path).suffix.lower()=='.mp4')]
         gaps=[];only304=[];warnings=[]
