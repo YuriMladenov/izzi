@@ -272,6 +272,20 @@ class LibraryWorkflow(unittest.TestCase):
         (self.state/'url_map.json').write_text('{broken')
         self.assertEqual(self.request('/__ui__/app.css')[0],200)
 
+    def test_home_uses_only_available_original_cover_for_matching_book(self):
+        self.write('books.json',{'1':{'title':'Математика за 4. клас','lessons':{}},'2':{'title':'Математика за 6. клас','lessons':{}}})
+        picture=b'\x89PNG\r\n\x1a\ncover'
+        self.add('/DOS/group-images/math.png',picture,content_type='image/png')
+        catalog={'data':{'grouped':[{'thumbs':{'image1':'/DOS/group-images/math.png'},'publications':[{'dos_id':1,'grade':{'number':4},'thumbs':{'image1':'/DOS/1/missing.png'}}]}],'ungrouped':{'publications':[]}}}
+        self.add('/api/online-bookshelf-publications',json.dumps(catalog).encode(),content_type='application/json')
+        self.start_server();page=self.request('/')[2].decode()
+        self.assertIn('Начален етап',page);self.assertIn('Прогимназиален етап',page)
+        self.assertEqual(1,page.count('class="original-cover"'))
+        self.assertNotIn('/DOS/1/missing.png',page)
+        self.assertIn('src="/__host__/bg.izzi.digital/DOS/group-images/math.png"',page)
+        self.assertEqual(picture,self.request('/__host__/bg.izzi.digital/DOS/group-images/math.png')[2])
+        self.assertNotIn('catalog-intro',page);self.assertNotIn('Съдържание на архива',page)
+
     def test_webui_journal_shows_counts_without_private_bodies(self):
         progress_journal.append(self.state/'progress','POST','/api/sync','http://localhost/DOS/1/9.html',b'{"secret":"PRIVATE_BODY"}','application/json')
         self.start_server()
@@ -299,7 +313,7 @@ class LibraryWorkflow(unittest.TestCase):
         self.start_server();text=self.request('/')[2].decode()
         self.assertEqual(2,text.count('<h3>Same title</h3>'))
         self.assertIn('ID 1',text);self.assertIn('ID 2',text)
-        self.assertIn('1 с наличен HTML',text);self.assertIn('0 с наличен HTML',text)
+        self.assertIn('1 с наличен HTML',self.request('/__book__/1')[2].decode());self.assertIn('0 с наличен HTML',self.request('/__book__/2')[2].decode())
         self.assertIn('data:,',text)
     def test_two_books_private_aliases_and_unscoped_ambiguity(self):
         self.add('/DOS/1/profil/app.js',b'book one',content_type='application/javascript')

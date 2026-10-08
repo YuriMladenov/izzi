@@ -9,6 +9,7 @@ from assembled_media import resolve as resolve_assembled
 import progress_journal
 import library_catalog
 import webui
+import book_covers
 import operations
 from import_har import load as load_archive_state
 
@@ -362,12 +363,15 @@ class H(BaseHTTPRequestHandler):
             print('[STATE ERROR]',type(error).__name__)
             return self.sendb(b'Archive state unavailable. Stop capture and run checks/lesson_diagnostic.bat.','text/plain; charset=utf-8',503)
         if p.path=="/":
+            covers=book_covers.catalog_covers(m,ARCHIVE_DIR,books)
+            stages={'Начален етап':[],'Прогимназиален етап':[],'Учебници':[]}
             items=[]
-            for bid,b in sorted(books.items()):
-                st=resource_stats(m,bid);pr=progress_summary(bid);known,available=page_counts(m,bid,b)
-                info='%d известни страници · %d с наличен HTML · %d документа · %d медия · %d изображения · %d локални записи'%(known,available,st["documents"],st["media"],st["images"],pr)
-                items.append(webui.book_card(bid,b.get('title','Учебник '+bid),info,available))
-            page='<ul class="book-grid">'+''.join(items)+'</ul>'
+            for bid,b in sorted(books.items(),key=lambda item:(covers[item[0]]['grade'] or 99,item[1].get('title',''),item[0])):
+                card=webui.book_card(bid,b.get('title','Учебник '+bid),covers[bid]['src'])
+                grade=covers[bid]['grade']
+                stage='Начален етап' if 1<=grade<=4 else 'Прогимназиален етап' if 5<=grade<=7 else 'Учебници'
+                stages[stage].append(card);items.append(card)
+            page=''.join('<section class="book-stage"><h2>'+stage+'</h2><ul class="book-grid">'+''.join(cards)+'</ul></section>' for stage,cards in stages.items() if cards)
             if not items:page+='<section class="empty"><h2>Библиотеката е празна</h2><p>Запиши първия си урок чрез capture или импортирай HAR файл. Тук ще се появят учебниците от твоя архив.</p><a href="/__help__">Как да започна →</a></section>'
             return self.sendb(webui.page(page,search=bool(items),catalog=True).encode(),"text/html; charset=utf-8")
         if p.path.startswith("/__book__/"):
