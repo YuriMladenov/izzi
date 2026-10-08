@@ -337,9 +337,9 @@ class H(BaseHTTPRequestHandler):
 
     def route(self):
         p=urlparse(self.path)
-        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js'):
+        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/izzi-logo.svg'):
             filename=p.path.rsplit('/',1)[1]
-            return self.sendb((webui.ASSETS/filename).read_bytes(),'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
+            return self.sendb((webui.ASSETS/filename).read_bytes(),'image/svg+xml' if filename.endswith('.svg') else 'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
         if p.path=='/__ops__/status':
             if not self.control_local():return self.sendb(b'{"error":"Local access only"}','application/json',403)
             return self.sendb(json.dumps(operations.tasks.snapshot(),ensure_ascii=False).encode(),'application/json')
