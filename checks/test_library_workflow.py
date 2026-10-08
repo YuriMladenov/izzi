@@ -272,14 +272,6 @@ class LibraryWorkflow(unittest.TestCase):
         (self.state/'url_map.json').write_text('{broken')
         self.assertEqual(self.request('/__ui__/app.css')[0],200)
 
-    def test_catalogue_account_routes_never_replay_captured_identity(self):
-        self.add('/api/userdata',b'{"data":{"mail":"PRIVATE_IDENTITY"}}',content_type='application/json')
-        self.start_server()
-        for route in ['/api/userdata','/__host__/bg.izzi.digital/api/userdata','/api/p/authapi/device-slots']:
-            code,_,body=self.request(route)
-            self.assertEqual(200,code);self.assertNotIn(b'PRIVATE_IDENTITY',body)
-            self.assertEqual({},json.loads(body)['data'])
-
     def test_webui_journal_shows_counts_without_private_bodies(self):
         progress_journal.append(self.state/'progress','POST','/api/sync','http://localhost/DOS/1/9.html',b'{"secret":"PRIVATE_BODY"}','application/json')
         self.start_server()

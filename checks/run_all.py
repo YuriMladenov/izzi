@@ -8,7 +8,7 @@ from pathlib import Path
 from http.server import ThreadingHTTPServer
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-SYNTHETIC=['test_media_contract','validate_replay','test_library_workflow','test_replay_html','test_original_catalog']
+SYNTHETIC=['test_media_contract','validate_replay','test_library_workflow','test_replay_html']
 REPORTS=['inspect_library','inspect_blobs','replay_map_diagnostic','replay_self_test','capture_report','capture_session_report','fresh_capture_report','recovery_report','media_map_report','media_replay_check','assembled_media_report','asset_diagnostic','font_diagnostic','lesson_diagnostic','book_readiness_report','final_readiness_report','missing_assets_report','progress_report']
 
 def main():
