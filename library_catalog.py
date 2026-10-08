@@ -1,19 +1,29 @@
 """Local presentation preferences; archive metadata remains unchanged."""
-import threading
+import threading,re
 from import_har import load,save
 LOCK=threading.Lock()
 
 def ordered_lessons(book_id,book,session,preferences):
     lessons=book.get('lessons',{})
-    order=[]
+    order=[];captured={}
     for visit in session.get('visits',[]):
         lid=str(visit.get('lesson',''))
+        if visit.get('kind')=='lesson-start' and str(visit.get('book'))==str(book_id) and lid in lessons and isinstance(visit.get('extra'),dict):
+            captured[lid]=visit['extra']
         if visit.get('kind')=='lesson-start' and str(visit.get('book'))==str(book_id) and lid in lessons and lid not in order:order.append(lid)
     settings=preferences.get(str(book_id),{})
     manual=settings.get('order',[])
     order=list(dict.fromkeys([str(x) for x in manual if str(x) in lessons]+order+list(lessons)))
     names=settings.get('names',{});hidden=set(settings.get('hidden',[]))
-    return [dict(lessons[lid],id=lid,title=names.get(lid) or lessons[lid].get('title','Урок '+lid),hidden=lid in hidden) for lid in order]
+    rows=[]
+    for lid in order:
+        meta=captured.get(lid,{})
+        title=names.get(lid) or meta.get('title') or lessons[lid].get('title','Урок '+lid)
+        number=str(meta.get('number',''))
+        if not re.fullmatch(r'\d+(?:\.\d+)*\.?',number):number=''
+        if number and not title.startswith(number+' '):title=number+' '+title
+        rows.append(dict(lessons[lid],id=lid,title=title,original_number=number,hidden=lid in hidden))
+    return rows
 
 def update(path,book_id,lessons,form):
     known=set(lessons)

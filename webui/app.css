@@ -13,3 +13,5 @@
 
 /* Shared styling for every local page, including catalogue editor and tools. */
 .catalog-home{--muted:#778494;--line:#e7eaee}.catalog-home h2:not(.book-stage h2){color:#445365;font-size:19px;letter-spacing:0}.catalog-home p{color:#667487}.catalog-home button,.catalog-home .download{border-radius:8px}.library-menu nav a:hover{background:#f6f2fa}.catalog-home .task-panel,.catalog-home .resource-list li,.catalog-home .table-wrap,.catalog-home .lesson-list{border-radius:10px;box-shadow:none}.catalog-home .task-panel{padding:20px}.catalog-home .searchbar{margin-bottom:24px}.catalog-home .empty{padding:26px;border-radius:10px}
+
+.lesson-list li.original-number:before{display:none}

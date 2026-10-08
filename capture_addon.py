@@ -51,7 +51,7 @@ def request(flow:http.HTTPFlow):
         q=parse_qs(p.query); kind=(q.get("kind") or ["event"])[0]
         book=(q.get("book") or [None])[0]; lesson=(q.get("lesson") or [None])[0]
         url=(q.get("url") or [None])[0]
-        extra={k:v[0] for k,v in q.items() if k in ("asset","reason","total","failed")}
+        extra={k:v[0] for k,v in q.items() if k in ("asset","reason","total","failed","title","number","module","section","order")}
         event(kind,book,lesson,url,extra)
         if kind in ("lesson-start","lesson-active"): set_active(book,lesson,url)
         elif kind in ("lesson-done","lesson-incomplete","book-done","book-incomplete"): clear_active()

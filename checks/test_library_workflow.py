@@ -91,6 +91,17 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertIn('name_2',edit);self.assertIn('checked',edit)
         self.assertEqual(self.request('/__catalog__/1',body,{'Content-Type':'application/x-www-form-urlencoded','Origin':'https://other.example'})[0],403)
 
+    def test_original_numbers_survive_rename_and_reordering(self):
+        from library_catalog import ordered_lessons
+        book={'lessons':{'9':{'title':'Nine'},'2':{'title':'Two'}}}
+        session={'visits':[{'kind':'lesson-start','book':'1','lesson':'2','extra':{'title':'Земята','number':'3.1.'}},
+                           {'kind':'lesson-start','book':'1','lesson':'9','extra':{'title':'3.2. Строеж','number':'3.2.'}}]}
+        rows=ordered_lessons('1',book,session,{})
+        self.assertEqual([r['title'] for r in rows],['3.1. Земята','3.2. Строеж'])
+        rows=ordered_lessons('1',book,session,{'1':{'order':['9','2'],'names':{'9':'Ново име'},'hidden':['2']}})
+        self.assertEqual([r['title'] for r in rows],['3.2. Ново име','3.1. Земята'])
+        self.assertTrue(rows[1]['hidden'])
+
     def completed(self,count=2):
         # Metadata misses two historical lessons; visits+map restore the union.
         self.write('books.json',{'1':{'lessons':{str(i):{} for i in range(max(0,count-2))}}})

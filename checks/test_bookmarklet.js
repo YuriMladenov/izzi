@@ -22,10 +22,11 @@ async function run(cancel){
  const links=[link('8',''),link('2','Втори урок <b>'),link('8','Първи урок'),Object.assign(link('9','Чужд'),{href:'https://bg.izzi.digital/DOS/9/9.html'})];
  const doc={body,createElement:t=>new Element(t),querySelectorAll:()=>links,getElementById:id=>body.children.find(x=>x.id===id&&!x.removed)||null};
  const task=vm.runInNewContext(source,{document:doc,location:new URL('https://bg.izzi.digital/DOS/1/index.html'),URL,URLSearchParams,AbortController,Map,Set,console:{warn:()=>{},error:()=>{}},clearTimeout:()=>{},alert:x=>alerts.push(x),fetch:async u=>{const q=new URL(u);if(q.pathname.endsWith('image_status'))return {ok:true,json:async()=>({capture:true,available:true})};events.push(q.searchParams);},setInterval:()=>1,clearInterval:()=>{},setTimeout:(f,ms)=>{if(ms!==20000)f();return 1;}});
+ for(let tick=0;tick<10&&!body.children.length;tick++)await Promise.resolve();
  const dialog=body.children[0];assert.equal(dialog.shown,true);
  const nodes=all(dialog),inputs=nodes.filter(x=>x.tag==='input'),button=t=>nodes.find(x=>x.tag==='button'&&x.textContent===t);
  assert.equal(inputs.length,2);assert(nodes.some(x=>x.textContent==='1. Първи урок — Пропусни'));
- assert(nodes.some(x=>x.textContent==='2. Втори урок <b> — Пропусни'));
+ assert(nodes.some(x=>x.textContent==='2. Втори урок — Пропусни'));
  if(cancel){button('Отказ').click();await task;assert.equal(events.length,0);assert.equal(dialog.removed,true);return;}
  button('Пропусни всички').click();assert.equal(button('Стартирай обхода').disabled,true);
  button('Обходи всички').click();assert.equal(button('Стартирай обхода').disabled,false);
@@ -33,8 +34,31 @@ async function run(cancel){
  assert.deepEqual(events.filter(x=>x.get('kind')==='lesson-start').map(x=>x.get('lesson')),['8']);
  assert.equal(dialog.removed,true);assert.equal(alerts.length,1);const iframe=body.children.find(x=>x.tag==='iframe');assert.equal(iframe.style.width,'1280px');assert.equal(iframe.style.height,'900px');assert(events.some(x=>x.get('kind')==='lesson-done'));assert(!events.some(x=>x.get('kind')==='lesson-incomplete'));
 }
+async function navigation(){
+ const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_navigation.js'),'utf8');
+ assert.equal(source.split('/*IZZI_NAV_START*/')[1].split('/*IZZI_NAV_END*/')[0],helper.split(/\r?\n/).join(''));
+ const row=(id,name,number,kind='unit')=>({id,name,prettyPosition:number,systemType:kind,isVisible:1});
+ const modules=[row(10,'Раздел А','1','module'),row(20,'Раздел Б','2','module')];
+ const roots={
+  initial:{modules,entries:[]},
+  chapter:{modules,entries:[row(11,'Първи','1.1.'),row(12,'Секция','1.2.','section'),{...row(99,'Скрит','1.9.'),isVisible:0}]},
+  section:{modules:[],entries:[row(13,'Втори','1.2.1.'),row(11,'Повторение','1.1.')]}
+ };
+ const element=(item,attrs={})=>({getAttribute:name=>name===':item'?JSON.stringify(item):attrs[name]||null});
+ const root=data=>({querySelectorAll:selector=>selector==='breadcrumbs'?[{getAttribute:()=>JSON.stringify([{...row(10,'Раздел А','1','module'),siblings:data.modules}])}]:selector.startsWith('units-list-item')?data.entries.map(item=>element(item)):[]});
+ const doc={querySelector:()=>null,createElement:()=>({set innerHTML(value){this.content=root(roots[value]);}})};
+ const paths=[];
+ const collect=vm.runInNewContext(helper+';collectCaptureLessons',{URL,Map,Set});
+ const fetchPage=async url=>{paths.push(url.pathname);return url.pathname.endsWith('/10.html')?'chapter':url.pathname.endsWith('/12.html')?'section':'initial';};
+ const lessons=await collect(doc,'https://bg.izzi.digital/DOS/1/0.html','1',fetchPage,async found=>{assert.equal(found.length,2);return [found[0]];});
+ assert.deepEqual(Array.from(lessons,x=>x.name),['1.1. Първи','1.2.1. Втори']);
+ assert.deepEqual(paths,['/DOS/1/0.html','/DOS/1/10.html','/DOS/1/12.html']);
+ assert.equal(lessons[1].section,'Секция');
+ const cancelled=await collect(doc,'https://bg.izzi.digital/DOS/1/0.html','1',fetchPage,async()=>null);
+ assert.equal(cancelled.length,0);
+}
 async function images(){
- const helper=source.slice(source.indexOf('async function captureLessonImages'),source.indexOf('const probe='));
+ const helper=source.slice(source.indexOf('async function captureLessonImages'),source.indexOf("await ping('book-start',location);"));
  const urls=[],events=[];let archived=true;
  class Image{set src(value){urls.push(value);this.naturalWidth=100;queueMicrotask(()=>this.onload());}}
  const lesson=new URL('https://bg.izzi.digital/DOS/1/8.html');
@@ -51,7 +75,7 @@ async function images(){
  assert(events.some(x=>x.extra.reason==='няма годен body в архива'));
 }
 async function attachments(){
- const helper=source.slice(source.indexOf('async function captureLessonFiles'),source.indexOf('const probe='));
+ const helper=source.slice(source.indexOf('async function captureLessonFiles'),source.indexOf("await ping('book-start',location);"));
  const lesson=new URL('https://bg.izzi.digital/DOS/128031/8.html'),requested=[],events=[];
  const links=['./datastore/15/publication/128031/files/cParts.exe','./datastore/15/publication/128031/files/inpDevices.sb3?v=1782308254','javascript:alert(1)'];
  const frame={contentDocument:{baseURI:lesson.href,querySelectorAll:()=>links.map(href=>({getAttribute:()=>href})),documentElement:{outerHTML:''}},contentWindow:{fetch:async(url,options)=>{requested.push(new URL(url));assert.equal(options.mode,'no-cors');return {blob:async()=>({})};}}};
@@ -65,7 +89,7 @@ async function attachments(){
  assert.equal(events.filter(x=>x.kind==='file-failed').length,2);
 }
 async function media(){
- const helper=source.slice(source.indexOf('async function captureLessonMedia'),source.indexOf('const probe='));
+ const helper=source.slice(source.indexOf('async function captureLessonMedia'),source.indexOf("await ping('book-start',location);"));
  const lesson=new URL('https://bg.izzi.digital/DOS/412693/9.html'),requested=[],events=[];
  const direct='https://bg.izzi.digital/DOS/412693/datastore/15/publication/3931/video/geo.mp4?v=17';
  const config='/datastore/15/publication/4043/video/sun.mp4';
@@ -79,4 +103,4 @@ async function media(){
  assert.equal((await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}))).failed,2);
  assert.equal(events.filter(e=>e.kind==='media-failed').length,2);
 }
-(async()=>{await media();await attachments();await images();await run(false);await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});
+(async()=>{await media();await attachments();await images();await run(false);await navigation();await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});
