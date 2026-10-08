@@ -10,6 +10,7 @@ import progress_journal
 import library_catalog
 import webui
 import operations
+import original_catalog
 from import_har import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
@@ -61,6 +62,8 @@ def rewrite(b):
            ("http://xapi.izzi.digital/","/__host__/xapi.izzi.digital/"),
            ("//xapi.izzi.digital/","/__host__/xapi.izzi.digital/"),
            ("https:\\/\\/xapi.izzi.digital\\/","\\/__host__\\/xapi.izzi.digital\\/"),
+           ("https://fonts.googleapis.com/","/__host__/fonts.googleapis.com/"),
+           ("https://fonts.gstatic.com/","/__host__/fonts.gstatic.com/"),
            ("https://www.googletagmanager.com/gtm.js","/__offline__/gtag.js"))
     for a,c in pairs:t=t.replace(a,c)
     # External YouTube playback is unavailable offline. Keep its API loader
@@ -328,6 +331,7 @@ class H(BaseHTTPRequestHandler):
         if mime.startswith("text/") or mime in TEXT or "javascript" in mime:
             try:
                 b=rewrite(b)
+                if path.startswith('/_nuxt/') and ext=='.js':b=original_catalog.adapt_script(b)
                 if path.lower().endswith(".html"): b=inject_media_map(b,path)
             except UnicodeDecodeError:
                 print("[BAD TEXT BLOB]",r["key"],path)
@@ -336,7 +340,7 @@ class H(BaseHTTPRequestHandler):
 
     def route(self):
         p=urlparse(self.path)
-        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js'):
+        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/original.js','/__ui__/original.css'):
             filename=p.path.rsplit('/',1)[1]
             return self.sendb((webui.ASSETS/filename).read_bytes(),'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
         if p.path=='/__ops__/status':
@@ -362,6 +366,10 @@ class H(BaseHTTPRequestHandler):
             print('[STATE ERROR]',type(error).__name__)
             return self.sendb(b'Archive state unavailable. Stop capture and run checks/lesson_diagnostic.bat.','text/plain; charset=utf-8',503)
         if p.path=="/":
+            original=original_catalog.ready(m,ARCHIVE_DIR)
+            if original:
+                return self.sendb(original_catalog.inject(rewrite(original.encode()).decode()).encode(),'text/html; charset=utf-8',extra={'Content-Security-Policy':"default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'none'; form-action 'none'"})
+        if p.path in ('/','/__library__'):
             items=[]
             for bid,b in sorted(books.items()):
                 st=resource_stats(m,bid);pr=progress_summary(bid);known,available=page_counts(m,bid,b)
@@ -443,6 +451,16 @@ class H(BaseHTTPRequestHandler):
             page+='<script>'+Path(__file__).with_name('missing_download.js').read_text(encoding='utf-8')+'</script>'
             page=re.sub(r'<style>.*?</style>','',page,flags=re.S).replace('<ul>','<ul class="resource-list">')
             return self.sendb(webui.page(page,'Липсващи ресурси','missing',search=bool(missing or warnings)).encode(),"text/html; charset=utf-8")
+        api_path=p.path.removeprefix('/__host__/'+SOURCE_HOST)
+        if api_path=='/api/userdata':
+            return self.sendb(b'{"status":{"success":true},"data":{}}','application/json')
+        if api_path.startswith('/api/p/authapi/') and api_path not in original_catalog.PUBLIC_API:
+            return self.sendb(b'{"status":{"success":false},"data":{}}','application/json')
+        if api_path=='/api/online-bookshelf-publications':
+            row=find(m,SOURCE_HOST,api_path,p.query,lambda r:usable_body(r,ARCHIVE_DIR,'.json'))
+            if row:
+                payload=json.loads((ARCHIVE_DIR/row['key']).read_text())
+                return self.sendb(rewrite(json.dumps(original_catalog.local_shelf(payload,books),ensure_ascii=False).encode()),'application/json')
         if p.path.startswith("/__host__/"):
             rest=p.path[len("/__host__/"):]
             if "/" not in rest:return self.sendb(b"Bad route","text/plain",400)
