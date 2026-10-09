@@ -318,6 +318,44 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertEqual(picture,self.request('/__host__/bg.izzi.digital/DOS/group-images/math.png')[2])
         self.assertNotIn('catalog-intro',page);self.assertNotIn('Съдържание на архива',page)
 
+    def test_covers_keep_original_palette_and_second_image(self):
+        import book_covers
+        self.write('books.json',{'1':{'title':'Book','lessons':{}}})
+        for filename in ('front','back'):
+            self.add('/DOS/1/'+filename+'.png',b'\x89PNG\r\n\x1a\n'+filename.encode(),content_type='image/png')
+        payload={'data':{'ungrouped':{'publications':[{'dos_id':1,'dos_class':'palette3',
+            'thumbs':{'image1':'/DOS/1/front.png','image2':'/DOS/1/back.png'}}]}}}
+        self.add('/api/online-bookshelf-publications',json.dumps(payload).encode(),content_type='application/json')
+        self.start_server()
+        page=self.request('/')[2].decode()
+        self.assertIn('book-thumbnail palette3',page)
+        self.assertIn('class="cover-tile"',page)
+        self.assertIn('class="cover-decoration" src="/__host__/bg.izzi.digital/DOS/1/back.png"',page)
+        self.assertIn('class="original-cover" src="/__host__/bg.izzi.digital/DOS/1/front.png"',page)
+
+    def test_lan_is_reader_only_even_with_direct_admin_urls(self):
+        self.write('books.json',{'1':{'title':'Book','lessons':{'2':{'title':'Lesson','path':'/DOS/1/2.html'}}}})
+        self.add('/DOS/1/2.html')
+        self.start_server()
+        headers={'Host':'192.168.1.20'}
+        for path in ('/','/__book__/1'):
+            code,_,body=self.request(path,headers=headers)
+            self.assertEqual(code,200)
+            self.assertNotIn('library-menu',body.decode())
+            self.assertNotIn('Подреди / преименувай / скрий',body.decode())
+        self.assertEqual(self.request('/DOS/1/2.html',headers=headers)[0],200)
+        for path in ('/__book__/1?edit=1','/__missing__','/__journal__','/__help__','/__operations__','/__ops__/status'):
+            self.assertEqual(self.request(path,headers=headers)[0],403,path)
+        body=b'order_2=1&hidden_2=on'
+        self.assertEqual(self.request('/__catalog__/1',body,{**headers,'Content-Type':'application/x-www-form-urlencoded'})[0],403)
+        self.assertFalse((self.state/'library_catalog.json').exists())
+        self.assertIn('library-menu',self.request('/')[2].decode())
+        self.assertEqual(self.request('/__book__/1?edit=1')[0],200)
+        handler=object.__new__(server.H)
+        handler.client_address=('192.168.1.30',1234)
+        handler.headers={'Host':'localhost','X-Forwarded-For':'127.0.0.1'}
+        self.assertFalse(handler.control_local())
+
     def test_webui_journal_shows_counts_without_private_bodies(self):
         progress_journal.append(self.state/'progress','POST','/api/sync','http://localhost/DOS/1/9.html',b'{"secret":"PRIVATE_BODY"}','application/json')
         self.start_server()

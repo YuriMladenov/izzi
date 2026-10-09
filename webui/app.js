@@ -1,4 +1,5 @@
 (()=>{
+for(const decoration of document.querySelectorAll('img.cover-decoration'))decoration.addEventListener('error',()=>decoration.hidden=true);
 for(const image of document.querySelectorAll('img.original-cover'))image.addEventListener('error',()=>{image.hidden=true;image.parentElement.classList.add('no-cover');});
 const input=document.getElementById('ui-search');if(!input)return;
 const items=[...document.querySelectorAll('[data-search-item]')],count=document.getElementById('ui-count'),empty=document.getElementById('ui-no-results');

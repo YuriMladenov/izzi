@@ -17,3 +17,55 @@
 .lesson-list li.original-number:before{display:none}
 
 .lesson-section{margin-top:28px}.lesson-section h2{margin-bottom:12px}.lesson-section .lesson-list{margin-top:0}
+
+.book-thumbnail{position:relative;isolation:isolate}.book-thumbnail .original-cover{position:relative;z-index:2}.cover-decoration{position:absolute;width:108px;height:140px;object-fit:contain;left:50%;top:0;transform:translateX(-50%);z-index:1}.cover-tile{position:absolute;width:98px;height:120px;left:50%;top:11px;transform:translateX(-50%);z-index:0;border-radius:2px}
+.book-thumbnail.palette0 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#c113fe,#50315d)}
+.book-thumbnail.palette1 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#bf00ff,#8f00ff)}
+.book-thumbnail.palette2 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#235f85,#14425e)}
+.book-thumbnail.palette3 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#f06c3d,#d9352f)}
+.book-thumbnail.palette4 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#4174ff,#233eb8)}
+.book-thumbnail.palette5 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#e7917c,#ca745f)}
+.book-thumbnail.palette6 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#35baf7,#0c90cf)}
+.book-thumbnail.palette7 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#c82fc1,#92008a)}
+.book-thumbnail.palette8 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#ff9c9a,#ea6968)}
+.book-thumbnail.palette9 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#833aac,#4b096d)}
+.book-thumbnail.palette10 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#153567,#000a38)}
+.book-thumbnail.palette11 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#e899a3,#fe7387)}
+.book-thumbnail.palette12 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#226973,#07424e)}
+.book-thumbnail.palette13 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#ff7ca6,#d9165c)}
+.book-thumbnail.palette14 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#ad3dca,#7000a8)}
+.book-thumbnail.palette15 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#e48295,#c93651)}
+.book-thumbnail.palette16 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#32b151,#92ba3b)}
+.book-thumbnail.palette17 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#a93bfe,#fc2b2d)}
+.book-thumbnail.palette18 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#bf00ff,#8f00ff)}
+.book-thumbnail.palette19 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#5be7ce,#233eb8)}
+.book-thumbnail.palette20 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#a8df51,#0c90cf)}
+.book-thumbnail.palette21 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#235f85,#14425e)}
+.book-thumbnail.palette22 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#f06c3d,#d9352f)}
+.book-thumbnail.palette23 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#d2cab1,#ca745f)}
+.book-thumbnail.palette24 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#c9ff2e,#e4b200)}
+.book-thumbnail.palette25 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#d60058,#8a1d40)}
+.book-thumbnail.palette26 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#ff882b,#ff7000)}
+.book-thumbnail.palette27 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#c03,#dc002c)}
+.book-thumbnail.palette28 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#f29400,#00b1c8)}
+.book-thumbnail.palette29 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#f29400,#00b1c8)}
+.book-thumbnail.palette30 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#a3cad1,#008971)}
+.book-thumbnail.palette31 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#a3cad1,#008971)}
+.book-thumbnail.palette32 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#e64215,#ed7a01)}
+.book-thumbnail.palette33 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#c82fc1,#92008a)}
+.book-thumbnail.palette34 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#f8971d,#d07503)}
+.book-thumbnail.palette35 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#86bc24,#558401)}
+.book-thumbnail.palette36 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#f06c3d,#cd0000)}
+.book-thumbnail.palette37 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#4174ff,#233eb8)}
+.book-thumbnail.palette38 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#00af9a,#009987)}
+.book-thumbnail.palette39 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#fcb604,#edab0a)}
+.book-thumbnail.palette40 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#35baf7,#0c90cf)}
+.book-thumbnail.palette41 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#550173,#a245ff)}
+.book-thumbnail.palette42 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#f6c607,#3faebd)}
+.book-thumbnail.palette43 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#f58221,#005291)}
+.book-thumbnail.palette44 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#ff1278,#a501b4)}
+.book-thumbnail.palette45 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#c6d0ea,#93a9d7)}
+.book-thumbnail.palette46 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#cfd2d8,#73767b)}
+.book-thumbnail.palette50 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#9a6f00,#d9352f)}
+.book-thumbnail.palette51 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#086086,#07424e)}
+.book-thumbnail.palette52 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#648027,#1f8904)}

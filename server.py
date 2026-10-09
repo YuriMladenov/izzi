@@ -340,6 +340,9 @@ class H(BaseHTTPRequestHandler):
 
     def route(self):
         p=urlparse(self.path)
+        readonly=not self.control_local()
+        if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__') or p.path.startswith(('/__ops__/','/__catalog__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
+            return self.sendb(b'Local administration only','text/plain; charset=utf-8',403)
         if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/izzi-logo.svg'):
             filename=p.path.rsplit('/',1)[1]
             return self.sendb((webui.ASSETS/filename).read_bytes(),'image/svg+xml' if filename.endswith('.svg') else 'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
@@ -370,13 +373,14 @@ class H(BaseHTTPRequestHandler):
             stages={'Начален етап':[],'Прогимназиален етап':[],'Учебници':[]}
             items=[]
             for bid,b in sorted(books.items(),key=lambda item:(covers[item[0]]['grade'] or 99,item[1].get('title',''),item[0])):
-                card=webui.book_card(bid,b.get('title','Учебник '+bid),covers[bid]['src'])
+                card=webui.book_card(bid,b.get('title','Учебник '+bid),covers[bid]['src'],covers[bid]['decoration'],covers[bid]['palette'])
                 grade=covers[bid]['grade']
                 stage='Начален етап' if 1<=grade<=4 else 'Прогимназиален етап' if 5<=grade<=7 else 'Учебници'
                 stages[stage].append(card);items.append(card)
             page=''.join('<section class="book-stage"><h2>'+stage+'</h2><ul class="book-grid">'+''.join(cards)+'</ul></section>' for stage,cards in stages.items() if cards)
-            if not items:page+='<section class="empty"><h2>Библиотеката е празна</h2><p>Запиши първия си урок чрез capture или импортирай HAR файл. Тук ще се появят учебниците от твоя архив.</p><a href="/__help__">Как да започна →</a></section>'
-            return self.sendb(webui.page(page,search=bool(items),catalog=True).encode(),"text/html; charset=utf-8")
+            if not items:
+                page+='<section class="empty"><h2>Библиотеката е празна</h2>'+('<p>Все още няма добавени учебници.</p>' if readonly else '<p>Запиши първия си урок чрез capture или импортирай HAR файл. Тук ще се появят учебниците от твоя архив.</p><a href="/__help__">Как да започна →</a>')+'</section>'
+            return self.sendb(webui.page(page,search=bool(items),catalog=True,readonly=readonly).encode(),"text/html; charset=utf-8")
         if p.path.startswith("/__book__/"):
             bid=p.path.split("/")[-1];b=books.get(bid)
             if not b:return self.sendb(b"Unknown book","text/plain",404)
@@ -404,9 +408,10 @@ class H(BaseHTTPRequestHandler):
                 sections.append('<section class="lesson-section"><h2>%s</h2><ol class="lesson-list">%s</ol></section>'%(html.escape(heading),items))
             items=''.join(sections)
             known,available=page_counts(m,bid,b)
-            content='<h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a> · <a class="download" href="?edit=1">Подреди / преименувай / скрий</a></p>%s'%(html.escape(b["title"]),html.escape(bid),known,available,items)
+            edit_link='' if readonly else ' · <a class="download" href="?edit=1">Подреди / преименувай / скрий</a>'
+            content='<h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a>%s</p>%s'%(html.escape(b["title"]),html.escape(bid),known,available,edit_link,items)
             if not items:content+='<p class="empty">Няма показани уроци. Провери скритите страници в редактора.</p>'
-            return self.sendb(webui.page(content,'Уроци',search=bool(items)).encode(),"text/html; charset=utf-8")
+            return self.sendb(webui.page(content,'Уроци',search=bool(items),readonly=readonly).encode(),"text/html; charset=utf-8")
         if p.path=="/__offline__/gtag.js":
             return self.sendb(b"window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){window.dataLayer.push(arguments);};","application/javascript")
         if p.path=="/__offline__/youtube-api.js":
@@ -526,6 +531,9 @@ class H(BaseHTTPRequestHandler):
         return self.sendb(b'{"ok":true}','application/json')
 
     def catalog_save(self):
+        if not self.control_local():
+            self.close_connection=True
+            return self.sendb(b'Local administration only','text/plain',403)
         # Browser cross-origin writes must not modify the local catalogue.
         origin=self.headers.get('Origin')
         if origin and origin!='http://'+self.headers.get('Host',''):

@@ -12,7 +12,7 @@ def grade_number(title,publication=None):
     return int(match.group(1)) if match else 0
 
 def catalog_covers(mapping,archive,books):
-    result={str(bid):{'src':'','grade':grade_number(book.get('title',''))} for bid,book in books.items()}
+    result={str(bid):{'src':'','decoration':'','palette':'','grade':grade_number(book.get('title',''))} for bid,book in books.items()}
     record=find(mapping,SOURCE,'/api/online-bookshelf-publications','',lambda row:usable_body(row,archive,'.json'))
     if not record:return result
     try:payload=json.loads((archive/record['key']).read_text(encoding='utf8'))
@@ -35,7 +35,13 @@ def catalog_covers(mapping,archive,books):
         if not isinstance(publication,dict):return
         bid=str(publication.get('dos_id',''))
         if bid not in result:return
-        cover=thumbnail(publication.get('thumbs')) or thumbnail((group or {}).get('thumbs'))
+        thumbs=publication.get('thumbs')
+        if not thumbnail(thumbs):thumbs=(group or {}).get('thumbs')
+        cover=thumbnail(thumbs,('image1',)) or thumbnail(thumbs)
+        decoration=thumbnail(thumbs,('image2',))
+        result[bid]['decoration']=decoration if decoration!=cover else ''
+        palette=publication.get('dos_class') or (group or {}).get('dos_class','')
+        result[bid]['palette']=palette if isinstance(palette,str) and re.fullmatch(r'palette(?:[0-9]|[1-4][0-9]|5[0-2])',palette) else ''
         if cover:result[bid]['src']=cover
         result[bid]['grade']=grade_number(books[bid].get('title',''),publication)
     for group in data.get('grouped',[]):
