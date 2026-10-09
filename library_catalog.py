@@ -22,7 +22,7 @@ def ordered_lessons(book_id,book,session,preferences):
         number=str(meta.get('number',''))
         if not re.fullmatch(r'\d+(?:\.\d+)*\.?',number):number=''
         if number and not title.startswith(number+' '):title=number+' '+title
-        rows.append(dict(lessons[lid],id=lid,title=title,original_number=number,hidden=lid in hidden))
+        rows.append(dict(lessons[lid],id=lid,title=title,original_number=number,module=meta.get('module') or lessons[lid].get('module',''),hidden=lid in hidden))
     return rows
 
 def update(path,book_id,lessons,form):

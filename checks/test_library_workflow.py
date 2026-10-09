@@ -102,6 +102,20 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertEqual([r['title'] for r in rows],['3.2. Ново име','3.1. Земята'])
         self.assertTrue(rows[1]['hidden'])
 
+    def test_lesson_list_shows_captured_module_and_escapes_its_name(self):
+        self.write('books.json',{'1':{'title':'Book','lessons':{
+            '2':{'title':'Earth','path':'/DOS/1/2.html'},
+            '3':{'title':'Older lesson','path':'/DOS/1/3.html'}}}})
+        self.write('capture_session.json',{'visits':[{'kind':'lesson-start','book':'1','lesson':'2',
+            'extra':{'module':'Планетата <Земя>','number':'3.1.'}}]})
+        self.start_server()
+        page=self.request('/__book__/1')[2].decode()
+        self.assertIn('3.1. Earth',page)
+        self.assertIn('<small class="lesson-module">Раздел: Планетата &lt;Земя&gt;</small>',page)
+        self.assertNotIn('Планетата <Земя>',page)
+        self.assertEqual(page.count('class="lesson-module"'),1)
+        self.assertIn('Older lesson',page)
+
     def completed(self,count=2):
         # Metadata misses two historical lessons; visits+map restore the union.
         self.write('books.json',{'1':{'lessons':{str(i):{} for i in range(max(0,count-2))}}})
