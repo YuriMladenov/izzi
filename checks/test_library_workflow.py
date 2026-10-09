@@ -270,6 +270,30 @@ class LibraryWorkflow(unittest.TestCase):
             start.assert_called_once_with('checks')
         self.assertEqual(self.request('/__ops__/action',b'{"task":"shell","action":"start"}',headers)[0],400)
 
+    def test_capture_finds_python_scripts_without_path_entry(self):
+        import operations,os
+        scripts=self.root/'Scripts';scripts.mkdir()
+        executable=scripts/('mitmdump.exe' if os.name=='nt' else 'mitmdump');executable.touch()
+        with patch.object(operations.sys,'executable',str(self.root/'python.exe')), patch.object(operations.sysconfig,'get_path',return_value=str(scripts)), patch.object(operations.shutil,'which',return_value=None):
+            self.assertEqual(operations.find_mitmdump(),str(executable))
+
+    def test_capture_reports_external_port_before_searching_executable(self):
+        import operations,config,socket
+        tasks=operations.Tasks()
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1',0));listener.listen()
+            with patch.object(config,'CAPTURE_PROXY_PORT',listener.getsockname()[1]), patch.object(operations,'find_mitmdump') as find, patch.object(operations.subprocess,'Popen') as spawn:
+                self.assertEqual(tasks.snapshot()['capture']['state'],'external')
+                with self.assertRaisesRegex(ValueError,'capture_mode.bat'):tasks.start('capture')
+                find.assert_not_called();spawn.assert_not_called()
+                tasks.stop('capture')
+                self.assertEqual(tasks.snapshot()['capture']['state'],'external')
+
+    def test_capture_unavailable_executable_gives_actionable_error(self):
+        import operations
+        with patch.object(operations.sys,'executable',str(self.root/'absent/python.exe')), patch.object(operations.sysconfig,'get_path',return_value=str(self.root/'absent/Scripts')), patch.object(operations.shutil,'which',return_value=None):
+            with self.assertRaisesRegex(ValueError,'рестартирай библиотеката'):operations.find_mitmdump()
+
     def test_operations_owned_process_lifecycle_and_log(self):
         import operations,time
         tasks=operations.Tasks()
