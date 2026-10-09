@@ -105,15 +105,22 @@ class LibraryWorkflow(unittest.TestCase):
     def test_lesson_list_shows_captured_module_and_escapes_its_name(self):
         self.write('books.json',{'1':{'title':'Book','lessons':{
             '2':{'title':'Earth','path':'/DOS/1/2.html'},
-            '3':{'title':'Older lesson','path':'/DOS/1/3.html'}}}})
+            '3':{'title':'Structure','path':'/DOS/1/3.html'},
+            '4':{'title':'Older lesson','path':'/DOS/1/4.html'}}}})
         self.write('capture_session.json',{'visits':[{'kind':'lesson-start','book':'1','lesson':'2',
-            'extra':{'module':'Планетата <Земя>','number':'3.1.'}}]})
+            'extra':{'module':'Планетата <Земя>','number':'3.1.'}},
+            {'kind':'lesson-start','book':'1','lesson':'3','extra':{'module':'Планетата <Земя>','number':'3.2.'}},
+            {'kind':'lesson-start','book':'1','lesson':'2','extra':{}}]})
         self.start_server()
         page=self.request('/__book__/1')[2].decode()
         self.assertIn('3.1. Earth',page)
-        self.assertIn('<small class="lesson-module">Раздел: Планетата &lt;Земя&gt;</small>',page)
+        self.assertIn('<h2>Планетата &lt;Земя&gt;</h2>',page)
+        self.assertLess(page.index('<h2>Планетата'),page.index('3.1. Earth'))
         self.assertNotIn('Планетата <Земя>',page)
-        self.assertEqual(page.count('class="lesson-module"'),1)
+        self.assertEqual(page.count('<h2>Планетата'),1)
+        self.assertLess(page.index('3.1. Earth'),page.index('3.2. Structure'))
+        self.assertEqual(page.count('class="lesson-section"'),2)
+        self.assertIn('<h2>Уроци без записан раздел</h2>',page)
         self.assertIn('Older lesson',page)
 
     def completed(self,count=2):

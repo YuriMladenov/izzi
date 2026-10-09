@@ -9,7 +9,7 @@ def ordered_lessons(book_id,book,session,preferences):
     for visit in session.get('visits',[]):
         lid=str(visit.get('lesson',''))
         if visit.get('kind')=='lesson-start' and str(visit.get('book'))==str(book_id) and lid in lessons and isinstance(visit.get('extra'),dict):
-            captured[lid]=visit['extra']
+            captured.setdefault(lid,{}).update({key:value for key,value in visit['extra'].items() if value})
         if visit.get('kind')=='lesson-start' and str(visit.get('book'))==str(book_id) and lid in lessons and lid not in order:order.append(lid)
     settings=preferences.get(str(book_id),{})
     manual=settings.get('order',[])

@@ -394,9 +394,17 @@ class H(BaseHTTPRequestHandler):
                 page='<!doctype html><meta charset="utf-8"><h1>Подреждане на уроци</h1><p>По-малкият номер се показва по-рано. Скриването запазва архивираните файлове и директните адреси на уроците.</p><form method="post" action="/__catalog__/%s"><table><tr><th>ID</th><th>Ред</th><th>Име</th><th>Скрит</th></tr>%s</table><button>Запази</button></form><p><a href="/__book__/%s">Назад</a></p>'%(html.escape(bid),''.join(rows),html.escape(bid))
                 page=page.replace('<table>','<div class="table-wrap"><table>').replace('</table>','</table></div>')
                 return self.sendb(webui.page(page,'Подреждане').encode(),'text/html; charset=utf-8')
-            items=''.join('<li data-search-item%s><a href="%s">%s</a> <small>(%s)</small></li>'%(' class="original-number"' if x.get('original_number') else '',html.escape(x["path"]),html.escape(x["title"])+('<small class="lesson-module">Раздел: %s</small>'%html.escape(x['module']) if x.get('module') else ''),html.escape(x["id"])) for x in ls if not x['hidden'])
+            groups={}
+            for x in ls:
+                if not x['hidden']:groups.setdefault(x.get('module') or '',[]).append(x)
+            sections=[]
+            for module,lessons in groups.items():
+                items=''.join('<li data-search-item data-search-text="%s"%s><a href="%s">%s</a> <small>(%s)</small></li>'%(html.escape(module,quote=True),' class="original-number"' if x.get('original_number') else '',html.escape(x['path']),html.escape(x['title']),html.escape(x['id'])) for x in lessons)
+                heading=module or ('Уроци без записан раздел' if any(groups) else 'Уроци')
+                sections.append('<section class="lesson-section"><h2>%s</h2><ol class="lesson-list">%s</ol></section>'%(html.escape(heading),items))
+            items=''.join(sections)
             known,available=page_counts(m,bid,b)
-            content='<h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a> · <a class="download" href="?edit=1">Подреди / преименувай / скрий</a></p><ol class="lesson-list">%s</ol>'%(html.escape(b["title"]),html.escape(bid),known,available,items)
+            content='<h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a> · <a class="download" href="?edit=1">Подреди / преименувай / скрий</a></p>%s'%(html.escape(b["title"]),html.escape(bid),known,available,items)
             if not items:content+='<p class="empty">Няма показани уроци. Провери скритите страници в редактора.</p>'
             return self.sendb(webui.page(content,'Уроци',search=bool(items)).encode(),"text/html; charset=utf-8")
         if p.path=="/__offline__/gtag.js":

@@ -16,4 +16,4 @@
 
 .lesson-list li.original-number:before{display:none}
 
-.lesson-list .lesson-module{display:block;margin-top:5px;font-size:12px;color:var(--muted);font-weight:normal}
+.lesson-section{margin-top:28px}.lesson-section h2{margin-bottom:12px}.lesson-section .lesson-list{margin-top:0}
