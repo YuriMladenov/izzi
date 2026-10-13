@@ -4,7 +4,7 @@ from pathlib import Path
 ASSETS=Path(__file__).with_name('webui')
 def page(content,title='Библиотека',active='library',search=False,catalog=False,readonly=False):
     content=re.sub(r'<!doctype[^>]*>|<meta[^>]*>|<link[^>]*>|<title>.*?</title>','',content,flags=re.I|re.S)
-    links=[('library','/','Библиотека','▤'),('missing','/__missing__','Липсващи ресурси','↧'),('journal','/__journal__','Локален журнал','◷'),('cleanup','/__cleanup__','Почистване на архива','⌫'),('operations','/__operations__','Capture и проверки','▷'),('help','/__help__','Как да използвам','?')]
+    links=[('library','/','Библиотека','▤'),('missing','/__missing__','Липсващи ресурси','↧'),('videos','/__videos__','Недовършени видеа','▶'),('journal','/__journal__','Локален журнал','◷'),('cleanup','/__cleanup__','Почистване на архива','⌫'),('operations','/__operations__','Capture и проверки','▷'),('help','/__help__','Как да използвам','?')]
     nav=''.join('<a href="%s" %s><span aria-hidden="true">%s</span>%s</a>'%(url,'aria-current="page"' if key==active else '',icon,label) for key,url,label,icon in links)
     searchbox='<div class="searchbar"><label for="ui-search">Търсене в списъка</label><input id="ui-search" type="search" placeholder="Въведи име, ID или адрес…" autocomplete="off"><span id="ui-count" role="status"></span></div><p id="ui-no-results" hidden>Няма съвпадения. Опитай с друго име или ID.</p>' if search else ''
     menu='<details class="library-menu"><summary>☰ <span>Меню</span></summary><nav aria-label="Основна навигация">'+nav+'</nav></details>'

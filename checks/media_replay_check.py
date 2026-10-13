@@ -26,3 +26,11 @@ for state,size,n,u,key in rows:
     print(f"[{state}] size={size} ranges={n}")
     print(" ",u)
     if key: print("  ->",key)
+
+from video_resume import inspect
+report=inspect()
+print('\nVerified incomplete IZZI MP4:',len(report['videos']))
+for video in report['videos']:
+    print('[INCOMPLETE]',video['label'],'covered=',video['covered'],'total=',video['total'],'missing ranges=',len(video['missing']))
+for error in report['errors']:print('STATE ERROR',error)
+print('За автоматично довършване: Меню → Недовършени видеа в локалната библиотека (capture proxy трябва да работи).')

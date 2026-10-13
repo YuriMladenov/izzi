@@ -415,16 +415,22 @@ class H(BaseHTTPRequestHandler):
     def route(self):
         p=urlparse(self.path)
         readonly=not self.control_local()
-        if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__','/__cleanup__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
+        if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__','/__cleanup__','/__videos__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/','/__videos__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
             return self.sendb(b'Local administration only','text/plain; charset=utf-8',403)
-        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/izzi-logo.svg'):
+        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/videos.js','/__ui__/izzi-logo.svg'):
             filename=p.path.rsplit('/',1)[1]
             return self.send_cached((webui.ASSETS/filename).read_bytes(),'image/svg+xml' if filename.endswith('.svg') else 'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
+        if p.path=='/__videos__':return self.videos_page()
+        if p.path=='/__videos__/status':
+            import video_resume
+            try:data={'report':video_resume.inspect(),'job':video_resume.jobs.snapshot()}
+            except (OSError,ValueError) as error:return self.sendb(json.dumps({'error':str(error)},ensure_ascii=False).encode(),'application/json',503)
+            return self.sendb(json.dumps(data,ensure_ascii=False).encode(),'application/json')
         if p.path=='/__ops__/status':
             if not self.control_local():return self.sendb(b'{"error":"Local access only"}','application/json',403)
             return self.sendb(json.dumps(operations.tasks.snapshot(),ensure_ascii=False).encode(),'application/json')
         if p.path=='/__operations__':
-            content='<h1>Capture и проверки</h1>'
+            content='<h1>Capture и проверки</h1><p><a href="/__videos__">Провери и довърши недовършени видеа</a></p>'
             if not self.control_local():
                 content+='<p class="empty">Управлението е достъпно само на компютъра със сървъра през http://127.0.0.1:8765/.</p>'
             else:
@@ -598,7 +604,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if urlparse(self.path).path=='/__cleanup__':return self.cleanup_action()
         if urlparse(self.path).path.startswith('/__delete_book__/'):return self.delete_book_action()
-        if urlparse(self.path).path=='/__ops__/action':return self.control_action()
+        if urlparse(self.path).path in ('/__ops__/action','/__videos__/action'):return self.control_action()
         if urlparse(self.path).path.startswith('/__catalog__/'):
             return self.catalog_save()
         self.progress()
@@ -621,6 +627,12 @@ class H(BaseHTTPRequestHandler):
             raw=self.rfile.read(length)
             if len(raw)!=length:raise ValueError('Incomplete request')
             data=json.loads(raw)
+            if urlparse(self.path).path=='/__videos__/action':
+                import video_resume
+                if not isinstance(data,dict) or data.get('action') not in ('start','stop') or not isinstance(data.get('id','all'),str):raise ValueError('Unknown command')
+                if data['action']=='start':video_resume.jobs.start(data.get('id','all'))
+                else:video_resume.jobs.stop()
+                return self.sendb(b'{"ok":true}','application/json')
             if not isinstance(data,dict) or data.get('task') not in ('capture','checks') or data.get('action') not in ('start','stop'):raise ValueError('Unknown command')
             if data['action']=='start':operations.tasks.start(data['task'])
             else:operations.tasks.stop(data['task'])
@@ -629,10 +641,19 @@ class H(BaseHTTPRequestHandler):
             return self.sendb(json.dumps({'error':str(error)},ensure_ascii=False).encode(),'application/json',400)
         return self.sendb(b'{"ok":true}','application/json')
 
+    def videos_page(self):
+        import video_resume
+        content='<h1>Недовършени видеа</h1><p>Проверка на наличните MP4 файлове и видео части. За довършване са нужни интернет и работещ capture proxy. Изтеглят се липсващите диапазони; наличните части се запазват.</p><p>При отказ за достъп отвори видеото в оригиналния урок с правилния профил във Firefox през capture proxy и опитай отново. Cookies и tokens се използват само в паметта на proxy и не се записват на диска. YouTube видеата се изтеглят чрез отделния YouTube механизъм.</p>'
+        try:
+            report=video_resume.inspect()
+            content+='<div id="video-resume" data-token="%s"><p id="video-message" role="status"></p><button id="videos-refresh">Провери отново</button> <button data-video="all" %s>Довърши всички</button> <button id="videos-stop" disabled>Спри изтеглянето</button><p id="videos-state" role="status"></p><div id="videos-list"></div><pre id="videos-log" class="task-log"></pre></div><script src="/__ui__/videos.js" defer></script>'%(html.escape(operations.tasks.token,quote=True),'disabled' if not report['videos'] or report['errors'] else '')
+        except (OSError,ValueError) as error:content+='<p class="empty">Проверката е блокирана: '+html.escape(str(error))+'</p>'
+        return self.sendb(webui.page(content,'Недовършени видеа','videos').encode(),'text/html; charset=utf-8')
+
     def cleanup_page(self,p):
         import archive_cleanup
         query=parse_qs(p.query);include=query.get('incomplete')==['1']
-        content='<h1>Почистване на архива</h1><p>Първо прегледай отчета. Файловете се преместват в state/cleanup_trash за възстановяване. Място на диска се освобождава след отделно окончателно изтриване.</p>'
+        content='<h1>Почистване на архива</h1><p>Първо прегледай отчета. Файловете се преместват в state/cleanup_trash за възстановяване. Място на диска се освобождава след отделно окончателно изтриване.</p><p><a href="/__videos__">Провери и довърши недовършените видеа</a>, преди да премахваш видео части.</p>'
         token='<input type="hidden" name="token" value="'+html.escape(operations.tasks.token,quote=True)+'">'
         try:
             if query.get('purge'):
@@ -732,4 +753,6 @@ if __name__=="__main__":
     try:
         ThreadingHTTPServer((HOST,PORT),H).serve_forever()
     finally:
+        import video_resume
+        video_resume.jobs.stop()
         operations.tasks.close()

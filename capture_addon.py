@@ -4,7 +4,8 @@ from urllib.parse import urlparse,parse_qs,urljoin
 from mitmproxy import http
 from config import *
 from import_har import load as load_json,save,metadata,RX,update_entry
-from range_assembler import add_range,register_complete
+from range_assembler import add_range,register_complete,restore_archived
+from collections import OrderedDict
 from media_mapping import add_media
 from capture_session import event
 from capture_observed import observe
@@ -25,6 +26,9 @@ UPDATE_UNTIL=0
 STATIC_EXT={'.html','.htm','.js','.css','.json','.svg','.png','.jpg','.jpeg','.gif','.webp','.woff','.woff2','.ttf','.mp4','.mp3','.webm','.pdf','.sb3','.sb2','.zip','.exe'}
 
 MAX_BODY=250*1024*1024
+# Session headers stay in proxy memory, scoped to the exact video URL.
+VIDEO_HEADERS=OrderedDict()
+SESSION_HEADERS=('Cookie','Authorization','Referer','Origin','User-Agent')
 
 def allowed(host):
     h=(host or "").lower()
@@ -33,6 +37,29 @@ def allowed(host):
 def request(flow:http.HTTPFlow):
     global MISSING_ONLY,UPDATE_BOOK,UPDATE_UNTIL
     p=urlparse(flow.request.pretty_url)
+    if flow.request.headers.pop('X-IZZI-Resume',None):
+        from video_resume import safe_url
+        peer=getattr(flow.client_conn,'peername',None)
+        if flow.request.method!='GET' or not peer or peer[0] not in ('127.0.0.1','::1') or not safe_url(flow.request.pretty_url):
+            flow.response=http.Response.make(403,b'Local IZZI MP4 resume only');return
+        flow.metadata['izzi_resume']=True
+        target=canonical_url(flow.request.pretty_url)
+        for name,value in VIDEO_HEADERS.get(target,{}).items():flow.request.headers[name]=value
+        restore_archived(target)
+        manifest=STATE_DIR/'range_assembly'/(hashlib.sha256(target.encode()).hexdigest()+'.json')
+        if manifest.is_file():
+            validator=load_json(manifest,{}).get('validator')
+            if validator and not validator.startswith('W/'):flow.request.headers['If-Range']=validator
+
+        row=find(load_json(URL_MAP_FILE,{}),p.hostname,p.path,p.query,lambda r:usable_body(r,ARCHIVE_DIR,'.mp4'))
+        if row:
+            body=(ARCHIVE_DIR/row['key']).read_bytes();size=len(body)
+            match=re.fullmatch(r'bytes=(\d+)-(\d+)',flow.request.headers.get('Range',''))
+            if match:
+                start,end=int(match[1]),min(int(match[2]),size-1)
+                if start<size:
+                    flow.response=http.Response.make(206,body[start:end+1],{'Content-Type':'video/mp4','Content-Range':f'bytes {start}-{end}/{size}','X-IZZI-Archive':'1'});return
+            flow.response=http.Response.make(200,body,{'Content-Type':'video/mp4','X-IZZI-Archive':'1'});return
 
     if p.hostname==SOURCE_HOST and p.path=="/__offline_capture__/youtube":
         import youtube_download
@@ -94,7 +121,7 @@ def request(flow:http.HTTPFlow):
             "Access-Control-Allow-Origin":"*","Cache-Control":"no-store"})
         return
 
-    if MISSING_ONLY and time.monotonic()<UPDATE_UNTIL and flow.request.method.upper()=='GET' and allowed(p.hostname):
+    if not getattr(flow,'metadata',{}).get('izzi_resume') and MISSING_ONLY and time.monotonic()<UPDATE_UNTIL and flow.request.method.upper()=='GET' and allowed(p.hostname):
         owner=re.search(r'/DOS/(\d+)/',p.path) or re.search(r'/DOS/(\d+)/',flow.request.headers.get('referer',''))
         scoped=(owner and owner[1]==UPDATE_BOOK) or (not owner and p.path.startswith(('/datastore/','/profil/','/assets/','/_nuxt/'))) or (p.hostname in external_links.hosts() and not p.hostname.endswith('izzi.digital'))
         ext=Path(p.path).suffix.lower()
@@ -148,11 +175,17 @@ def response(flow:http.HTTPFlow):
     p=urlparse(url);ct=flow.response.headers.get("content-type","")
     is_mp4=p.path.lower().endswith(".mp4") or ct.lower().startswith("video/mp4")
     cr=flow.response.headers.get("content-range")
+    if is_mp4 and status==206 and getattr(flow,'metadata',{}).get('izzi_resume') and flow.response.headers.get("content-encoding","identity").lower() not in ("identity",""):
+        flow.response=http.Response.make(502,b'Compressed byte ranges cannot be resumed safely');return
+    if is_mp4 and status in (200,206) and not getattr(flow,'metadata',{}).get('izzi_resume'):
+        VIDEO_HEADERS[url]={name:flow.request.headers[name] for name in SESSION_HEADERS if name in flow.request.headers}
+        VIDEO_HEADERS.move_to_end(url)
+        while len(VIDEO_HEADERS)>256:VIDEO_HEADERS.popitem(last=False)
     if is_mp4:add_media(url,flow.request.headers.get("referer",""),dict(flow.request.headers))
 
     if is_mp4 and status==206 and cr:
         data=flow.response.raw_content or b""
-        final=add_range(url,cr,data)
+        final=add_range(url,cr,data,flow.response.headers.get("etag") or flow.response.headers.get("last-modified"))
         if final:register_complete(url,final,ct or "video/mp4")
         decoded=False
     else:
@@ -179,6 +212,8 @@ def response(flow:http.HTTPFlow):
     external_links.discover(url,data,ct)
     if flow.response.headers.get("location"):rec["location"]=flow.response.headers["location"]
     if cr:rec["content_range"]=cr
+    validator=flow.response.headers.get("etag") or flow.response.headers.get("last-modified")
+    if validator:rec["validator"]=validator
     if flow.request.headers.get("range"):rec["request_range"]=flow.request.headers["range"]
     sig=(key,flow.request.method,status,cr)
     def append(arr):
