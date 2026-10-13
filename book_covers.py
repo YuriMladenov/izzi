@@ -1,15 +1,28 @@
 """Match local books to usable original thumbnails in the captured catalogue."""
-import json,re
+import json,re,html
 from urllib.parse import urlsplit,quote
 from replay_resolver import find,usable_body
 SOURCE='bg.izzi.digital'
 
 def grade_number(title,publication=None):
-    grade=(publication or {}).get('grade',{})
+    publication=publication or {}
+    grade=publication.get('grade',{})
+    ordinals={'първи':1,'втори':2,'трети':3,'четвърти':4,'пети':5,'шести':6,'седми':7,'осми':8,'девети':9,'десети':10,'единадесети':11,'дванадесети':12}
+    romans={'I':1,'II':2,'III':3,'IV':4,'V':5,'VI':6,'VII':7,'VIII':8,'IX':9,'X':10,'XI':11,'XII':12}
+    labels=[title,publication.get('name','')]
+    if isinstance(grade,dict):labels.extend([grade.get('name',''),grade.get('label','')])
+    elif isinstance(grade,str):labels.append(grade)
+    for label in labels:
+        text=re.sub(r'<[^>]*>',' ',html.unescape(str(label or '')))
+        match=re.search(r'\b(\d{1,2})\s*\.?\s*клас\b',text,re.I)
+        if match and 1<=int(match[1])<=12:return int(match[1])
+        match=re.search(r'\b('+'|'.join(ordinals)+r')\s+клас\b',text,re.I)
+        if match:return ordinals[match[1].lower()]
+        match=re.search(r'\b([IVX]+)\s*\.?\s*клас\b',text,re.I)
+        if match and match[1].upper() in romans:return romans[match[1].upper()]
     value=grade.get('number') if isinstance(grade,dict) else None
-    if isinstance(value,int) and 1<=value<=12:return value
-    match=re.search(r'\b(\d{1,2})\s*\.?\s*клас\b',title,re.I)
-    return int(match.group(1)) if match else 0
+    if isinstance(value,(int,str)) and not isinstance(value,bool) and str(value).isdigit() and 1<=int(value)<=12:return int(value)
+    return 0
 
 def catalog_covers(mapping,archive,books):
     result={str(bid):{'src':'','decoration':'','palette':'','grade':grade_number(book.get('title',''))} for bid,book in books.items()}

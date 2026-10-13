@@ -389,6 +389,30 @@ class LibraryWorkflow(unittest.TestCase):
         record=self.add('/DOS/1/2.html',b'<html>complete</html>')
         self.assertTrue(usable_body(record,self.archive,'.html'))
 
+    def test_delete_book_is_local_confirmed_and_preserves_shared_content(self):
+        import operations,delete_book
+        self.write('books.json',{'1':{'title':'Delete me','lessons':{'2':{'title':'Lesson','path':'/DOS/1/2.html'}}},'3':{'title':'Keep me','lessons':{}}})
+        own=self.add('/DOS/1/2.html',b'<html>unique</html>')
+        shared=self.add('/DOS/1/picture.png',b'shared bytes',content_type='image/png')
+        self.add('/DOS/3/picture.png',b'shared bytes',content_type='image/png')
+        self.write('capture_session.json',{'visits':[{'book':'1','lesson':'2','kind':'lesson-start'},{'book':'3','lesson':'4','kind':'lesson-start'}]})
+        self.start_server()
+        preview=self.request('/__delete_book__/1')
+        self.assertEqual(preview[0],200);self.assertIn('Delete me',preview[2].decode())
+        self.assertTrue((self.archive/own['key']).exists())
+        self.assertEqual(self.request('/__delete_book__/1',headers={'Host':'192.168.1.20'})[0],403)
+        headers={'Content-Type':'application/x-www-form-urlencoded'}
+        self.assertEqual(self.request('/__delete_book__/1',b'token=wrong',headers)[0],403)
+        from urllib.parse import urlencode
+        body=urlencode({'token':operations.tasks.token}).encode()
+        with patch.object(operations,'capture_port_busy',return_value=True):self.assertEqual(self.request('/__delete_book__/1',body,headers)[0],400)
+        with patch.object(operations,'capture_port_busy',return_value=False):self.assertEqual(self.request('/__delete_book__/1',body,headers)[0],200)
+        self.assertNotIn('1',json.loads((self.state/'books.json').read_text()))
+        self.assertFalse((self.archive/own['key']).exists())
+        self.assertTrue((self.archive/shared['key']).exists())
+        self.assertEqual(json.loads((self.state/'capture_session.json').read_text())['visits'][0]['book'],'3')
+        self.assertEqual(self.request('/__book__/1')[0],404)
+
     def test_operations_owned_process_lifecycle_and_log(self):
         import operations,time
         tasks=operations.Tasks()
@@ -422,6 +446,18 @@ class LibraryWorkflow(unittest.TestCase):
         # UI assets stay available when private archive state is malformed.
         (self.state/'url_map.json').write_text('{broken')
         self.assertEqual(self.request('/__ui__/app.css')[0],200)
+
+    def test_explicit_class_in_title_overrides_conflicting_catalogue_number(self):
+        from book_covers import grade_number
+        for title in ('География за 5. клас','География за пети клас','География за V клас','География за <b>5.&nbsp;клас</b>'):
+            self.assertEqual(grade_number(title,{'grade':{'number':1}}),5)
+        self.assertEqual(grade_number('Учебник',{'grade':{'number':'7'}}),7)
+        self.assertEqual(grade_number('Учебник'),0)
+        self.write('books.json',{'1':{'title':'География за 5. клас','lessons':{}}})
+        self.add('/api/online-bookshelf-publications',json.dumps({'data':{'ungrouped':{'publications':[{'dos_id':1,'grade':{'number':1}}]}}}).encode(),content_type='application/json')
+        self.start_server();page=self.request('/')[2].decode()
+        self.assertIn('<h2>5. клас</h2>',page)
+        self.assertNotIn('<h2>1. клас</h2>',page)
 
     def test_home_uses_only_available_original_cover_for_matching_book(self):
         self.write('books.json',{'1':{'title':'Математика за 4. клас','lessons':{}},'2':{'title':'Математика за 6. клас','lessons':{}}})

@@ -357,7 +357,7 @@ class H(BaseHTTPRequestHandler):
     def route(self):
         p=urlparse(self.path)
         readonly=not self.control_local()
-        if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__') or p.path.startswith(('/__ops__/','/__catalog__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
+        if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
             return self.sendb(b'Local administration only','text/plain; charset=utf-8',403)
         if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/izzi-logo.svg'):
             filename=p.path.rsplit('/',1)[1]
@@ -384,6 +384,13 @@ class H(BaseHTTPRequestHandler):
         except (OSError,ValueError) as error:
             print('[STATE ERROR]',type(error).__name__)
             return self.sendb(b'Archive state unavailable. Stop capture and run checks/lesson_diagnostic.bat.','text/plain; charset=utf-8',503)
+        if p.path.startswith('/__delete_book__/'):
+            import delete_book
+            bid=p.path.rsplit('/',1)[-1]
+            try:result=delete_book.plan(bid,STATE_DIR,ARCHIVE_DIR)
+            except (ValueError,OSError):return self.sendb(b'Deletion preview unavailable','text/plain',400)
+            content='<h1>Изтриване на учебник</h1><p><b>%s</b></p><p>Ще се премахнат учебникът, настройките му, локалният му журнал и %d отделни файла (%.1f MB). Споделените и неразпознатите общи ресурси се запазват. Изтриването не може да се отмени. Спри capture преди потвърждението.</p><form method="post"><input type="hidden" name="token" value="%s"><button>Изтрий учебника и съдържанието</button></form><p><a href="/__book__/%s">Отказ</a></p>'%(html.escape(result['title']),len(result['files']),result['bytes']/1048576,html.escape(operations.tasks.token,quote=True),html.escape(bid))
+            return self.sendb(webui.page(content,'Изтриване').encode(),'text/html; charset=utf-8')
         if p.path=="/":
             covers=book_covers.catalog_covers(m,ARCHIVE_DIR,books)
             stages={**{str(grade)+'. клас':[] for grade in range(1,13)},'Без определен клас':[]}
@@ -430,7 +437,7 @@ class H(BaseHTTPRequestHandler):
                 sections.append('<section class="lesson-section"><h2>%s</h2><ol class="lesson-list">%s</ol></section>'%(html.escape(heading),items))
             items=''.join(sections)
             known,available=page_counts(m,bid,b)
-            edit_link='' if readonly else ' · <a class="download" href="?edit=1">Подреди / преименувай / скрий</a>'
+            edit_link='' if readonly else ' · <a class="download" href="?edit=1">Подреди / преименувай / скрий</a> · <a class="download" href="/__delete_book__/'+html.escape(bid)+'">Изтрий учебника</a>'
             content='<h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a>%s</p>%s'%(html.escape(b["title"]),html.escape(bid),known,available,edit_link,items)
             if not items:content+='<p class="empty">Няма показани уроци. Провери скритите страници в редактора.</p>'
             return self.sendb(webui.page(content,'Уроци',search=bool(items),readonly=readonly).encode(),"text/html; charset=utf-8")
@@ -521,6 +528,7 @@ class H(BaseHTTPRequestHandler):
         print("[PROGRESS]",bid,self.command,urlparse(self.path).path)
         self.sendb(b'{"offline":true,"saved":true}',"application/json",200)
     def do_POST(self):
+        if urlparse(self.path).path.startswith('/__delete_book__/'):return self.delete_book_action()
         if urlparse(self.path).path=='/__ops__/action':return self.control_action()
         if urlparse(self.path).path.startswith('/__catalog__/'):
             return self.catalog_save()
@@ -551,6 +559,22 @@ class H(BaseHTTPRequestHandler):
             self.close_connection=True
             return self.sendb(json.dumps({'error':str(error)},ensure_ascii=False).encode(),'application/json',400)
         return self.sendb(b'{"ok":true}','application/json')
+
+    def delete_book_action(self):
+        if not self.control_local() or (self.headers.get('Origin') and self.headers['Origin']!='http://'+self.headers.get('Host','')):
+            self.close_connection=True;return self.sendb(b'Local administration only','text/plain',403)
+        try:
+            length=int(self.headers.get('Content-Length','0'))
+            if self.headers.get('Transfer-Encoding') or not 0<length<=2048:raise ValueError('Invalid request')
+            self.connection.settimeout(10)
+            form=parse_qs(self.rfile.read(length).decode('utf8'))
+            if form.get('token')!=[operations.tasks.token]:return self.sendb(b'Invalid confirmation','text/plain',403)
+            if operations.capture_port_busy():raise ValueError('Спри capture преди изтриване на учебника.')
+            import delete_book
+            delete_book.remove(urlparse(self.path).path.rsplit('/',1)[-1],STATE_DIR,ARCHIVE_DIR)
+        except (ValueError,OSError) as error:
+            return self.sendb(str(error).encode(),'text/plain; charset=utf-8',400)
+        return self.sendb(b'','text/plain',303,extra={'Location':'/'})
 
     def catalog_save(self):
         if not self.control_local():
