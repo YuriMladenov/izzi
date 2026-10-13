@@ -2,12 +2,16 @@ import base64,hashlib,html,json,mimetypes,re,sys,time,os,tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 from config import *
+import archive_db
+from archive_storage import blob_key
 RX=re.compile(r"^/DOS/(\d+)/(\d+)\.html$")
 SENSITIVE={"authorization","proxy-authorization","cookie","set-cookie","x-api-key","x-auth-token","x-csrf-token","x-xsrf-token"}
 def load(p,d):
+    if archive_db.active(p):return archive_db.Index(p)
     try:return json.loads(Path(p).read_text(encoding="utf-8"))
     except FileNotFoundError:return d
 def save(p,o):
+    if archive_db.active(p):return archive_db.write(p,o)
     p=Path(p);p.parent.mkdir(parents=True,exist_ok=True)
     # Readers see either the old complete JSON or the new complete JSON.
     # Never truncate the live URL map while replay is reading it.
@@ -19,6 +23,11 @@ def save(p,o):
         os.replace(tmp,p)
     finally:
         Path(tmp).unlink(missing_ok=True)
+def update_entry(path,key,mutate,default):
+    if archive_db.active(path):return archive_db.update_entry(path,key,mutate,default)
+    mapping=load(path,{})
+    value=mapping.setdefault(key,default);mutate(value);save(path,mapping)
+
 def body(c):
     if c.get("text") is None:return None
     try:return base64.b64decode(c["text"]) if c.get("encoding")=="base64" else c["text"].encode()
@@ -56,6 +65,7 @@ def metadata(data,bid,lid):
 def main():
     if len(sys.argv)<2:print("Плъзни HAR файл върху import_har.bat");return 1
     for d in (ARCHIVE_DIR,STATE_DIR,CAPTURES_DIR):d.mkdir(parents=True,exist_ok=True)
+    archive_db.initialize(STATE_DIR)
     mp=load(URL_MAP_FILE,{});books=load(BOOKS_FILE,{});imports=load(IMPORTS_FILE,[])
     for arg in sys.argv[1:]:
         hp=Path(arg);h=json.loads(hp.read_text(encoding="utf-8"));entries=h.get("log",{}).get("entries",[]);n=0
@@ -65,7 +75,7 @@ def main():
             p=urlparse(u);u=p._replace(fragment="").geturl();data=body(res.get("content",{}))
             if data is None:continue
             ct=res.get("content",{}).get("mimeType") or "";ext=Path(p.path).suffix or mimetypes.guess_extension(ct.split(";")[0]) or ".bin"
-            key="blobs/"+hashlib.sha256(data).hexdigest()+ext[:12];f=ARCHIVE_DIR/key;f.parent.mkdir(parents=True,exist_ok=True)
+            key=blob_key(hashlib.sha256(data).hexdigest(),ext[:12]);f=ARCHIVE_DIR/key;f.parent.mkdir(parents=True,exist_ok=True)
             if not f.exists():f.write_bytes(data)
             rec={"key":key,"content_type":ct,"status":res.get("status",200),"body_available":True,"method":req.get("method","GET"),"size":len(data)}
             arr=mp.setdefault(u,[])

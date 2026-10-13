@@ -3,6 +3,7 @@ import json,threading,re
 from pathlib import Path
 from urllib.parse import urlparse,unquote
 from replay_resolver import _canon_path
+import archive_db
 LOCK=threading.RLock();CACHE={}
 
 class ReplayMap(dict):
@@ -27,6 +28,10 @@ def signature(path):
 def load(path,default):
     path=Path(path).resolve()
     with LOCK:
+        if archive_db.active(path):
+            stamp=('sqlite',signature(archive_db.database(path)),archive_db.revision(archive_db.database(path)))
+            if path in CACHE and CACHE[path][0]==stamp:return CACHE[path][1]
+            value=archive_db.Index(path);CACHE[path]=(stamp,value);return value
         try:stamp=signature(path)
         except FileNotFoundError:CACHE.pop(path,None);return default
         if path in CACHE and CACHE[path][0]==stamp:return CACHE[path][1]

@@ -1,7 +1,9 @@
 import json,re,hashlib
 from pathlib import Path
 from config import ARCHIVE_DIR,STATE_DIR,URL_MAP_FILE
-from import_har import load as load_json,save
+from import_har import load as load_json,save,update_entry
+
+from archive_storage import assembled_key
 
 RX=re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+|\*)$",re.I)
 STATE=STATE_DIR/"range_assembly"
@@ -38,7 +40,7 @@ def add_range(url,content_range,data):
     print(f"[MP4 COVERAGE] {covered}/{total} ({covered*100/total:.1f}%)",url)
     if cov!=[[0,total-1]]: return None
 
-    final=ARCHIVE_DIR/"assembled"/(uid(url)+".mp4"); final.parent.mkdir(parents=True,exist_ok=True)
+    final=ARCHIVE_DIR/assembled_key(uid(url)); final.parent.mkdir(parents=True,exist_ok=True)
     tmp=final.with_suffix(".tmp")
     pos=0
     with tmp.open("wb") as out:
@@ -54,11 +56,10 @@ def add_range(url,content_range,data):
     tmp.replace(final); print("[MP4 COMPLETE]",total,url); return final
 
 def register_complete(url,path,content_type="video/mp4"):
-    mp=load_json(URL_MAP_FILE,{})
     rel=str(path.relative_to(ARCHIVE_DIR)).replace("\\","/")
     rec={"key":rel,"content_type":content_type or "video/mp4","status":200,
          "body_available":True,"method":"GET","size":path.stat().st_size,
          "source":"assembled_ranges","complete":True,"decoded":True}
-    arr=mp.setdefault(url,[])
-    if not any(x.get("key")==rel and x.get("complete") for x in arr): arr.append(rec)
-    save(URL_MAP_FILE,mp)
+    def append(arr):
+        if not any(x.get("key")==rel and x.get("complete") for x in arr):arr.append(rec)
+    update_entry(URL_MAP_FILE,url,append,[])

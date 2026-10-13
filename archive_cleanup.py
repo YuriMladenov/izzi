@@ -3,7 +3,10 @@ import hashlib,json,re,shutil,threading,uuid
 from pathlib import Path
 from time import time as now
 from urllib.parse import urlsplit
-from import_har import save
+from import_har import save,load
+from collections.abc import Mapping
+import archive_db
+from archive_storage import assembled_key
 from replay_resolver import find,usable_body,complete_body
 LOCK=threading.RLock()
 
@@ -19,10 +22,16 @@ def contained(root,path):
 
 def report(archive,state,include_incomplete=False):
     archive=Path(archive);state=Path(state)
-    mapping=read(state/'url_map.json');books=read(state/'books.json')
-    if not isinstance(mapping,dict) or not isinstance(books,dict):raise ValueError('Невалиден индекс: почистването е блокирано.')
+    using_db=archive_db.active(state/'url_map.json')
+    mapping=load(state/'url_map.json',{}) if using_db else read(state/'url_map.json')
+    books=load(state/'books.json',{}) if using_db else read(state/'books.json')
+    if not isinstance(mapping,Mapping) or not isinstance(books,Mapping):raise ValueError('Невалиден индекс: почистването е блокирано.')
     if books and not mapping:raise ValueError('Празен URL индекс при налични учебници: почистването е блокирано.')
     protected=set();stamps=[]
+    if using_db:
+        db=state/archive_db.DB_NAME
+        if not contained(state,db):raise ValueError('Невалиден път на SQLite индекса.')
+        stat=db.stat();stamps.append(('sqlite',archive_db.revision(db),stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns,stat.st_ino))
     def protect(value):
         if isinstance(value,dict):
             for item in value.values():protect(item)
@@ -36,9 +45,11 @@ def report(archive,state,include_incomplete=False):
                 protected.add(p.resolve())
     for path in sorted(state.rglob('*.json')):
         if 'cleanup_trash' in path.relative_to(state).parts:continue
+        if path.parent==state and (path.name=='storage_migration_report.json' or (using_db and path.name in archive_db.NAMES)):continue
         if not contained(state,path):raise ValueError('Символни връзки в state: почистването е блокирано.')
         data=read(path);stat=path.stat();stamps.append((str(path.relative_to(state)),stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns))
         protect(data)
+    protect(dict(books.items()))
     for rows in mapping.values():
         if not isinstance(rows,list):raise ValueError('Невалиден url_map.json.')
         for row in rows:
@@ -66,7 +77,7 @@ def report(archive,state,include_incomplete=False):
             if not isinstance(part,list) or len(part)!=3 or not isinstance(part[0],int) or not isinstance(part[1],int) or not 0<=part[0]<=part[1]<total or not isinstance(part[2],str):raise ValueError('Невалиден диапазон в range manifest.')
         identity=hashlib.sha256(url.encode()).hexdigest()
         if manifest.stem!=identity:raise ValueError('Неразпознат range manifest: почистването е блокирано.')
-        final=archive/'assembled'/(identity+'.mp4');protected.add(final.resolve())
+        for final in (archive/'assembled'/(identity+'.mp4'),archive/assembled_key(identity)):protected.add(final.resolve())
         parsed=urlsplit(url)
         row=find(mapping,parsed.hostname or '',parsed.path,parsed.query,lambda r:usable_body(r,archive,'.mp4') and (r.get('status')==200 or complete_body(r)))
         completed=bool(row and (archive/row['key']).stat().st_size==total)
@@ -113,6 +124,7 @@ def report(archive,state,include_incomplete=False):
         if entry['root']=='state' and (state/entry['path']).resolve() in needed_parts:
             preserved.append({**entry,'category':'Части, нужни на недовършено видео'});del selected[key]
     files=sorted(selected.values(),key=lambda x:(x['root'],x['path']))
+    if using_db and stamps[0][1]!=archive_db.revision(state/archive_db.DB_NAME):raise ValueError('Индексът се промени. Генерирай нов отчет.')
     fingerprint=hashlib.sha256(json.dumps([stamps,files,include_incomplete],sort_keys=True).encode()).hexdigest()
     return {'files':files,'preserved':preserved,'bytes':sum(x['size'] for x in files),'fingerprint':fingerprint,'include_incomplete':include_incomplete}
 

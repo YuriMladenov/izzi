@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 import html,json,mimetypes,re,time,hashlib
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from pathlib import Path
@@ -438,7 +439,7 @@ class H(BaseHTTPRequestHandler):
         if p.path=='/__cleanup__':return self.cleanup_page(p)
         try:
             m=load_archive_state(URL_MAP_FILE,{});books=load_archive_state(BOOKS_FILE,{})
-            if not isinstance(m,dict) or not isinstance(books,dict):raise ValueError('invalid state root')
+            if not isinstance(m,Mapping) or not isinstance(books,Mapping):raise ValueError('invalid state root')
         except (OSError,ValueError) as error:
             print('[STATE ERROR]',type(error).__name__)
             return self.sendb(b'Archive state unavailable. Stop capture and run checks/lesson_diagnostic.bat.','text/plain; charset=utf-8',503)
@@ -724,6 +725,8 @@ class H(BaseHTTPRequestHandler):
 
 if __name__=="__main__":
     for d in (ARCHIVE_DIR,STATE_DIR,CAPTURES_DIR,PROGRESS_DIR):d.mkdir(parents=True,exist_ok=True)
+    import archive_db
+    archive_db.initialize(STATE_DIR)
     print(f"IZZI Offline Library: http://{CLIENT_HOST}:{PORT}/")
     print(f"Listening on {HOST}:{PORT}; LAN access: http://<computer IPv4>:{PORT}/")
     try:

@@ -20,7 +20,7 @@ def _build_index():
     if CACHED and CACHED[0] is m:return CACHED[1],CACHED[2]
     exact={}
     path={}
-    for u,rs in m.items():
+    for u,rs in (m.complete_items() if hasattr(m,'complete_items') else m.items()):
         pu=urlparse(u)
         if Path(pu.path).suffix.lower()!=".mp4": continue
         for r in rs:

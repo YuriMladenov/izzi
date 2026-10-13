@@ -1,18 +1,21 @@
 """Read-only lesson record diagnostics; never prints HTML bodies or URL queries."""
+from collections.abc import Mapping
 import json
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from config import ROOT,ARCHIVE_DIR,URL_MAP_FILE,SOURCE_HOST
+import archive_db
+from import_har import load
 from replay_resolver import _canon_path,_izzi_host,find,usable_body,complete_range
 
 def main():
     print('PROJECT',ROOT)
-    print('URL MAP',URL_MAP_FILE)
+    print('URL MAP',archive_db.database(URL_MAP_FILE) if archive_db.active(URL_MAP_FILE) else URL_MAP_FILE)
     try:
-        mapping=json.loads(URL_MAP_FILE.read_text(encoding='utf-8'))
-        if not isinstance(mapping,dict):raise ValueError('URL map root must be an object')
+        mapping=load(URL_MAP_FILE,{})
+        if not isinstance(mapping,Mapping):raise ValueError('URL map root must be an object')
     except (OSError,ValueError) as error:
         print('STATE ERROR',str(error));return 1
     paths=sys.argv[1:] or ['/DOS/1408736/1408782.html','/DOS/1408736/1408803.html']

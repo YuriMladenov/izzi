@@ -3,7 +3,7 @@ from pathlib import Path
 from urllib.parse import urlparse,parse_qs,urljoin
 from mitmproxy import http
 from config import *
-from import_har import load as load_json,save,metadata,RX
+from import_har import load as load_json,save,metadata,RX,update_entry
 from range_assembler import add_range,register_complete
 from media_mapping import add_media
 from capture_session import event
@@ -13,6 +13,11 @@ from replay_resolver import find,usable_body
 from cache_bust_recovery import canonical_url,is_recovery_url,note as note_recovery
 
 import external_links
+import archive_db
+from archive_storage import blob_key
+
+def running():
+    archive_db.initialize(STATE_DIR)
 
 MISSING_ONLY=False
 UPDATE_BOOK=''
@@ -162,12 +167,11 @@ def response(flow:http.HTTPFlow):
 
     ext=Path(p.path).suffix or mimetypes.guess_extension(ct.split(";")[0]) or ".bin"
     ext=ext[:12] if ext.startswith(".") else ".bin"
-    key="blobs/"+hashlib.sha256(data).hexdigest()+ext
+    key=blob_key(hashlib.sha256(data).hexdigest(),ext)
     ARCHIVE_DIR.mkdir(parents=True,exist_ok=True);STATE_DIR.mkdir(parents=True,exist_ok=True)
     fp=ARCHIVE_DIR/key;fp.parent.mkdir(parents=True,exist_ok=True)
     if data and not fp.exists():fp.write_bytes(data)
 
-    mp=load_json(URL_MAP_FILE,{})
     rec={"key":key,"content_type":ct,"status":status,"body_available":bool(data),
          "method":flow.request.method,"size":len(data),
          "source":"cache_bust_recovery_v3.3.3" if recovering else "capture_proxy_v3.2",
@@ -176,18 +180,19 @@ def response(flow:http.HTTPFlow):
     if flow.response.headers.get("location"):rec["location"]=flow.response.headers["location"]
     if cr:rec["content_range"]=cr
     if flow.request.headers.get("range"):rec["request_range"]=flow.request.headers["range"]
-    arr=mp.setdefault(url,[]);sig=(key,flow.request.method,status,cr)
-    if not any((x.get("key"),x.get("method"),x.get("status"),x.get("content_range"))==sig for x in arr):
-        arr.append(rec);save(URL_MAP_FILE,mp)
+    sig=(key,flow.request.method,status,cr)
+    def append(arr):
+        if not any((x.get("key"),x.get("method"),x.get("status"),x.get("content_range"))==sig for x in arr):arr.append(rec)
+    update_entry(URL_MAP_FILE,url,append,[])
 
     if p.netloc==SOURCE_HOST and flow.request.method=="GET":
         m=RX.match(p.path)
         if m and status==200 and data:
             bid,lid=m.groups();bt,lt=metadata(data,bid,lid)
-            books=load_json(BOOKS_FILE,{})
-            b=books.setdefault(bid,{"id":bid,"title":bt,"lessons":{}})
-            if bt:b["title"]=bt
-            b["lessons"][lid]={"id":lid,"path":p.path,"title":lt};save(BOOKS_FILE,books)
+            def update_book(b):
+                if bt:b["title"]=bt
+                b.setdefault("lessons",{})[lid]={"id":lid,"path":p.path,"title":lt}
+            update_entry(BOOKS_FILE,bid,update_book,{"id":bid,"title":bt,"lessons":{}})
             print("[LESSON]",bid,lid,lt);return
     print("[RECOVERED]" if recovering else ("[RANGE]" if status==206 else "[CAPTURE]"),
           status,len(data),cr or "",url)

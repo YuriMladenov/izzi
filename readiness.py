@@ -1,4 +1,7 @@
 """Read-only readiness assessment using the same resolver as HTTP replay."""
+from collections.abc import Mapping
+from import_har import load
+import archive_db
 import json
 import re
 from pathlib import Path
@@ -10,10 +13,10 @@ IMPORTANT={'.html','.js','.mjs','.css','.json','.svg','.png','.jpg','.jpeg','.we
            '.woff','.woff2','.ttf','.otf','.mp4','.mp3','.wav','.ogg','.m4a','.wasm','.pdf','.exe','.sb','.sb2','.sb3','.zip','.docx','.xlsx','.pptx'}
 
 def read_state(path,default,errors):
-    if not path.exists():return default
+    if not path.exists() and not archive_db.active(path):return default
     try:
-        value=json.loads(path.read_text(encoding='utf-8'))
-        if not isinstance(value,type(default)):raise ValueError('unexpected JSON root type')
+        value=load(path,default)
+        if not isinstance(value,Mapping if isinstance(default,dict) else type(default)):raise ValueError('unexpected JSON root type')
         return value
     except (OSError,ValueError) as e:
         errors.append(f'{path.name}: {e}')
