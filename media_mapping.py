@@ -52,7 +52,8 @@ def add_media(url,referer,request_headers=None):
 
 def lesson_media(book,lid):
     """Return strict media record dictionaries for one exact lesson."""
-    e=load().get("lessons",{}).get(f"{book}/{lid}",{})
+    from archive_state import load as cached_load
+    e=cached_load(P,{}).get("lessons",{}).get(f"{book}/{lid}",{})
     return [i for i in e.get("media",[])
             if isinstance(i,dict) and i.get("url") and i.get("strict")
             and belongs_to_lesson(urlparse(i["url"]).path,book)]

@@ -1,7 +1,9 @@
 from pathlib import Path
 from urllib.parse import urlparse
 from config import ARCHIVE_DIR, URL_MAP_FILE, SOURCE_HOST
-from import_har import load
+from archive_state import load
+import threading
+LOCK=threading.RLock();CACHED=None
 from replay_resolver import usable_body
 
 def _valid(r):
@@ -10,7 +12,12 @@ def _valid(r):
     return usable_body(r,ARCHIVE_DIR,'.mp4') and (ARCHIVE_DIR/r['key']).stat().st_size>0
 
 def build_index():
+    with LOCK:return _build_index()
+
+def _build_index():
+    global CACHED
     m=load(URL_MAP_FILE,{})
+    if CACHED and CACHED[0] is m:return CACHED[1],CACHED[2]
     exact={}
     path={}
     for u,rs in m.items():
@@ -24,16 +31,17 @@ def build_index():
             if u not in exact or score>exact[u]["score"]: exact[u]=item
             k=(pu.netloc.lower(),pu.path)
             if k not in path or score>path[k]["score"]: path[k]=item
+    CACHED=(m,exact,path)
     return exact,path
 
 def resolve(request_url):
     exact,paths=build_index()
-    if request_url in exact:return exact[request_url],"exact"
+    if request_url in exact and _valid(exact[request_url]["record"]):return exact[request_url],"exact"
     p=urlparse(request_url)
     k=(p.netloc.lower(),p.path)
-    if k in paths:return paths[k],"path"
+    if k in paths and _valid(paths[k]["record"]):return paths[k],"path"
     # Local replay URLs are represented as SOURCE_HOST in the archive.
     if not p.netloc:
         k=(SOURCE_HOST,p.path)
-        if k in paths:return paths[k],"local-path"
+        if k in paths and _valid(paths[k]["record"]):return paths[k],"local-path"
     return None,None

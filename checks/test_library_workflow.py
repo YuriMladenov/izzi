@@ -436,6 +436,54 @@ class LibraryWorkflow(unittest.TestCase):
             self.assertEqual(self.request('/__offline__/youtube-video/'+identifier)[2],video.read_bytes())
             self.assertEqual(self.request('/__offline__/youtube-video/'+identifier,headers={'Range':'bytes=0-7'})[0],206)
 
+    def test_replay_cache_refreshes_changed_state_and_preserves_alias_scope(self):
+        import archive_state
+        from replay_resolver import find
+        self.add('/DOS/1/profil/app.js',b'one',content_type='application/javascript')
+        self.add('/DOS/2/profil/app.js',b'two',content_type='application/javascript')
+        path=self.state/'url_map.json'
+        first=archive_state.load(path,{})
+        self.assertIs(first,archive_state.load(path,{}))
+        self.assertIsNone(find(first,'bg.izzi.digital','/profil/app.js',''))
+        self.assertEqual(find(first,'bg.izzi.digital','/profil/app.js','',book='1')['key'],self.mapping['https://bg.izzi.digital/DOS/1/profil/app.js'][0]['key'])
+        self.add('/DOS/1/new.js',b'new',content_type='application/javascript')
+        updated=archive_state.load(path,{})
+        self.assertIsNot(first,updated)
+        self.assertIsNotNone(find(updated,'bg.izzi.digital','/DOS/1/new.js',''))
+        path.write_text('{bad json')
+        with self.assertRaises(ValueError):archive_state.load(path,{})
+        path.unlink();self.assertEqual(archive_state.load(path,{}),{})
+
+    def test_static_browser_cache_revalidates_changes_and_removals(self):
+        path='/DOS/1/profil/app.css'
+        self.add(path,b'body{color:red}',content_type='text/css')
+        self.start_server()
+        code,headers,body=self.request(path)
+        self.assertEqual(code,200);self.assertIn('must-revalidate',headers['Cache-Control'])
+        tag=headers['ETag']
+        response=self.request(path,headers={'If-None-Match':tag})
+        self.assertEqual(response[0],304);self.assertEqual(response[2],b'')
+        self.assertEqual(self.request(path,headers={'If-None-Match':'W/'+tag})[0],304)
+        self.assertEqual(self.request(path,headers={'If-None-Match':tag},method='HEAD')[0],304)
+        self.add(path,b'body{color:blue}',content_type='text/css')
+        changed=self.request(path,headers={'If-None-Match':tag})
+        self.assertEqual(changed[0],200);self.assertNotEqual(changed[1]['ETag'],tag)
+        self.assertEqual(changed[2],b'body{color:blue}')
+        self.mapping.pop('https://bg.izzi.digital'+path);self.write('url_map.json',self.mapping)
+        self.assertEqual(self.request(path,headers={'If-None-Match':changed[1]['ETag']})[0],404)
+        self.assertEqual(self.request('/')[1]['Cache-Control'],'no-store')
+        self.assertEqual(self.request('/__ui__/app.css',headers={'If-None-Match':self.request('/__ui__/app.css')[1]['ETag']})[0],304)
+
+    def test_media_etag_and_if_range_preserve_seek_behavior(self):
+        path='/DOS/1/video.mp4';data=b'0123456789'
+        self.add(path,data,content_type='video/mp4')
+        self.start_server()
+        tag=self.request(path)[1]['ETag']
+        response=self.request(path,headers={'Range':'bytes=2-5','If-Range':tag})
+        self.assertEqual(response[0],206);self.assertEqual(response[2],b'2345')
+        self.assertEqual(self.request(path,headers={'Range':'bytes=2-5','If-Range':'"old-version"'})[2],data)
+        self.assertEqual(self.request(path,headers={'If-None-Match':tag})[0],304)
+
     def test_operations_owned_process_lifecycle_and_log(self):
         import operations,time
         tasks=operations.Tasks()

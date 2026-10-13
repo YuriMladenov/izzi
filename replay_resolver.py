@@ -129,8 +129,9 @@ def find(m,host,path,q,usable=None,book=None):
 
     want=_canon_path(requested_path)
     hits=[]
-    for u,rs in m.items():
-        try: pp=urlparse(u)
+    candidates=m.replay_candidates(want) if hasattr(m,'replay_candidates') else ((u,None,rs) for u,rs in m.items())
+    for u,pp,rs in candidates:
+        try: pp=pp or urlparse(u)
         except: continue
         # Never alias arbitrary external hosts. For the local bg.izzi.digital
         # route, any archived *.izzi.digital source is eligible.
@@ -165,8 +166,9 @@ def find(m,host,path,q,usable=None,book=None):
     if lm and _izzi_host(host):
         suffix=f"/DOS/{lm.group(1)}/{lm.group(2)}.html"
         lessons=[]
-        for u,rs in m.items():
-            pp=urlparse(u)
+        candidates=m.lesson_candidates(suffix) if hasattr(m,'lesson_candidates') else ((u,None,rs) for u,rs in m.items())
+        for u,pp,rs in candidates:
+            pp=pp or urlparse(u)
             if _izzi_host(pp.hostname) and unquote(pp.path).endswith(suffix):
                 r=pick(rs,usable)
                 if r: lessons.append((score(r),r,u))

@@ -1,4 +1,4 @@
-import html,json,mimetypes,re,time
+import html,json,mimetypes,re,time,hashlib
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from pathlib import Path
 from html.parser import HTMLParser
@@ -11,7 +11,7 @@ import library_catalog
 import webui
 import book_covers
 import operations
-from import_har import load as load_archive_state
+from archive_state import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
 DOC_EXT={".exe",".sb",".sb2",".sb3",".csv",".pdf",".doc",".docx",".xls",".xlsx",".ppt",".pptx",".zip",".rar",".7z",".txt",".rtf",".odt",".ods",".odp",".epub"}
@@ -274,6 +274,28 @@ def progress_summary(book_id):
 def missing_log():return STATE_DIR/"missing_resources.jsonl"
 
 class H(BaseHTTPRequestHandler):
+    def cache_match(self,etag):
+        candidates=self.headers.get('If-None-Match','').split(',')
+        matches=any(value.strip()=='*' or value.strip().removeprefix('W/')==etag for value in candidates)
+        if self.command not in ('GET','HEAD') or not matches:return False
+        self.send_response(304)
+        self.send_header('ETag',etag)
+        self.send_header('Cache-Control','private, max-age=0, must-revalidate')
+        self.end_headers()
+        return True
+
+    def send_cached(self,data,ctype,extra=None):
+        etag='"'+hashlib.sha256(data).hexdigest()+'"'
+        if self.cache_match(etag):return
+        self.send_response(200)
+        self.send_header('Content-Type',ctype)
+        self.send_header('Content-Length',str(len(data)))
+        self.send_header('ETag',etag)
+        self.send_header('Cache-Control','private, max-age=0, must-revalidate')
+        for key,value in (extra or {}).items():self.send_header(key,value)
+        self.end_headers()
+        if self.command!='HEAD':self.wfile.write(data)
+
     def sendb(self,b,ct="application/octet-stream",status=200,extra=None):
         self.send_response(status);self.send_header("Content-Type",ct);self.send_header("Content-Length",str(len(b)))
         self.send_header("Cache-Control","no-store")
@@ -282,7 +304,12 @@ class H(BaseHTTPRequestHandler):
         if self.command!="HEAD":self.wfile.write(b)
 
     def sendfile(self,f,ct):
-        total=f.stat().st_size;rr=parse_range(self.headers.get("Range"),total)
+        stat=f.stat();total=stat.st_size
+        etag='"'+hashlib.sha256((str(f)+str((stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns,stat.st_ino))).encode()).hexdigest()+'"'
+        if self.cache_match(etag):return
+        requested=self.headers.get('Range')
+        if requested and self.headers.get('If-Range') and self.headers['If-Range']!=etag:requested=None
+        rr=parse_range(requested,total)
         if rr=="invalid":
             self.send_response(416);self.send_header("Content-Range",f"bytes */{total}");self.end_headers();return
         if rr:
@@ -290,14 +317,22 @@ class H(BaseHTTPRequestHandler):
             self.send_response(206);self.send_header("Content-Type",ct);self.send_header("Accept-Ranges","bytes")
             self.send_header("Content-Range",f"bytes {a}-{b}/{total}");self.send_header("Content-Length",str(n))
             self.send_header("X-IZZI-Replay","complete-media-range")
-            self.send_header("Cache-Control","no-store");self.end_headers()
+            self.send_header("ETag",etag);self.send_header("Cache-Control","private, max-age=0, must-revalidate");self.end_headers()
             if self.command!="HEAD":
-                with f.open("rb") as x:x.seek(a);self.wfile.write(x.read(n))
+                with f.open("rb") as x:
+                    x.seek(a);self.stream_file(x,n)
             return
         self.send_response(200);self.send_header("Content-Type",ct);self.send_header("Accept-Ranges","bytes")
         self.send_header("Content-Length",str(total));self.send_header("X-IZZI-Replay","complete-media")
-        self.send_header("Cache-Control","no-store");self.end_headers()
-        if self.command!="HEAD":self.wfile.write(f.read_bytes())
+        self.send_header("ETag",etag);self.send_header("Cache-Control","private, max-age=0, must-revalidate");self.end_headers()
+        if self.command!="HEAD":
+            with f.open("rb") as stream:self.stream_file(stream,total)
+
+    def stream_file(self,stream,remaining):
+        while remaining:
+            chunk=stream.read(min(1048576,remaining))
+            if not chunk:break
+            self.wfile.write(chunk);remaining-=len(chunk)
 
     def archive(self,m,host,path,q):
         if _izzi_host(host) and path.startswith('/__offline_capture__/'):
@@ -361,9 +396,11 @@ class H(BaseHTTPRequestHandler):
             print("[MEDIA REPLAY]","complete="+str(bool(r.get("complete"))),
                   "range="+str(self.headers.get("Range")),r["key"],path)
             return self.sendfile(f,ct)
+        if (ext in FONT_EXT or mime.startswith(('image/','font/'))) and mime!='image/svg+xml':return self.sendfile(f,ct)
         b=f.read_bytes()
         if ext in DOC_EXT or '/files/' in path:
-            return self.sendb(b,ct,extra={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(Path(unquote(path)).name,safe='')})
+            sender=self.sendb if path.startswith('/api/') else self.send_cached
+            return sender(b,ct,extra={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(Path(unquote(path)).name,safe='')})
         if mime.startswith("text/") or mime in TEXT or "javascript" in mime:
             try:
                 b=rewrite(b,host)
@@ -371,6 +408,7 @@ class H(BaseHTTPRequestHandler):
             except UnicodeDecodeError:
                 print("[BAD TEXT BLOB]",r["key"],path)
                 return self.sendb(b"Captured text resource is still compressed/corrupt. Recapture with v3.2 and Disable Cache.","text/plain; charset=utf-8",502)
+        if not path.startswith('/api/') and (ext in {'.js','.css','.svg'} or mime=='image/svg+xml' or (ext=='.json' and '/datastore/blocks/' in path)):return self.send_cached(b,ct)
         return self.sendb(b,ct)
 
     def route(self):
@@ -380,7 +418,7 @@ class H(BaseHTTPRequestHandler):
             return self.sendb(b'Local administration only','text/plain; charset=utf-8',403)
         if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/izzi-logo.svg'):
             filename=p.path.rsplit('/',1)[1]
-            return self.sendb((webui.ASSETS/filename).read_bytes(),'image/svg+xml' if filename.endswith('.svg') else 'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
+            return self.send_cached((webui.ASSETS/filename).read_bytes(),'image/svg+xml' if filename.endswith('.svg') else 'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
         if p.path=='/__ops__/status':
             if not self.control_local():return self.sendb(b'{"error":"Local access only"}','application/json',403)
             return self.sendb(json.dumps(operations.tasks.snapshot(),ensure_ascii=False).encode(),'application/json')

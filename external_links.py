@@ -6,6 +6,7 @@ from config import STATE_DIR
 from import_har import load,save
 from replay_resolver import find,usable_body
 FILE=STATE_DIR/'lesson_links.json'
+HOST_CACHE=None
 BLOCKED=('google-analytics.com','googletagmanager.com','youtube.com','youtube-nocookie.com','doubleclick.net')
 
 def valid_url(value):
@@ -29,7 +30,13 @@ def register(value):
     data.setdefault(value,{'resources':[value]});save(FILE,data)
 
 def hosts():
-    return {urlsplit(url).hostname for entry in load(FILE,{}).values() for url in entry.get('resources',[]) if valid_url(url)}
+    global HOST_CACHE
+    from archive_state import load as cached_load
+    data=cached_load(FILE,{})
+    if HOST_CACHE and HOST_CACHE[0] is data:return HOST_CACHE[1]
+    result=frozenset(urlsplit(url).hostname for entry in data.values() for url in entry.get('resources',[]) if valid_url(url))
+    HOST_CACHE=(data,result)
+    return result
 
 def associate(url,referer):
     if not valid_url(url):return
