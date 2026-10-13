@@ -430,7 +430,9 @@ class LibraryWorkflow(unittest.TestCase):
         catalog={'data':{'grouped':[{'thumbs':{'image1':'/DOS/group-images/math.png'},'publications':[{'dos_id':1,'grade':{'number':4},'thumbs':{'image1':'/DOS/1/missing.png'}}]}],'ungrouped':{'publications':[]}}}
         self.add('/api/online-bookshelf-publications',json.dumps(catalog).encode(),content_type='application/json')
         self.start_server();page=self.request('/')[2].decode()
-        self.assertIn('Начален етап',page);self.assertIn('Прогимназиален етап',page)
+        self.assertIn('<h2>4. клас</h2>',page);self.assertIn('<h2>6. клас</h2>',page)
+        self.assertLess(page.index('<h2>4. клас</h2>'),page.index('<h2>6. клас</h2>'))
+        self.assertNotIn('Начален етап',page);self.assertNotIn('Прогимназиален етап',page)
         self.assertEqual(1,page.count('class="original-cover"'))
         self.assertNotIn('/DOS/1/missing.png',page)
         self.assertIn('src="/__host__/bg.izzi.digital/DOS/group-images/math.png"',page)

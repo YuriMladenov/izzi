@@ -386,12 +386,12 @@ class H(BaseHTTPRequestHandler):
             return self.sendb(b'Archive state unavailable. Stop capture and run checks/lesson_diagnostic.bat.','text/plain; charset=utf-8',503)
         if p.path=="/":
             covers=book_covers.catalog_covers(m,ARCHIVE_DIR,books)
-            stages={'Начален етап':[],'Прогимназиален етап':[],'Учебници':[]}
+            stages={**{str(grade)+'. клас':[] for grade in range(1,13)},'Без определен клас':[]}
             items=[]
             for bid,b in sorted(books.items(),key=lambda item:(covers[item[0]]['grade'] or 99,item[1].get('title',''),item[0])):
                 card=webui.book_card(bid,b.get('title','Учебник '+bid),covers[bid]['src'],covers[bid]['decoration'],covers[bid]['palette'])
                 grade=covers[bid]['grade']
-                stage='Начален етап' if 1<=grade<=4 else 'Прогимназиален етап' if 5<=grade<=7 else 'Учебници'
+                stage=str(grade)+'. клас' if 1<=grade<=12 else 'Без определен клас'
                 stages[stage].append(card);items.append(card)
             page=''.join('<section class="book-stage"><h2>'+stage+'</h2><ul class="book-grid">'+''.join(cards)+'</ul></section>' for stage,cards in stages.items() if cards)
             if not items:
