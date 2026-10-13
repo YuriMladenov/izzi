@@ -14,6 +14,7 @@ from replay_resolver import find,usable_body
 from cache_bust_recovery import canonical_url,is_recovery_url,note as note_recovery
 
 import external_links
+import capture_completion
 import archive_db
 from archive_storage import blob_key
 
@@ -72,6 +73,16 @@ def request(flow:http.HTTPFlow):
         data=external_links.status(target,load_json(URL_MAP_FILE,{}),ARCHIVE_DIR)
         flow.response=http.Response.make(200,json.dumps(data).encode(),{'Content-Type':'application/json','Cache-Control':'no-store'})
         return
+    if p.hostname==SOURCE_HOST and p.path=="/__offline_capture__/lesson_status":
+        try:
+            raw=flow.request.content or b''
+            if flow.request.method!='POST' or len(raw)>256*1024:raise ValueError('Invalid status request')
+            data=json.loads(raw)
+            result=capture_completion.status(data.get('lesson',''),data.get('assets',[]),load_json(URL_MAP_FILE,{}),ARCHIVE_DIR)
+            flow.response=http.Response.make(200,json.dumps(result).encode(),{'Content-Type':'application/json','Cache-Control':'no-store'})
+        except (OSError,ValueError,AttributeError) as error:
+            flow.response=http.Response.make(503,b'{"error":"Lesson archive status unavailable"}',{'Content-Type':'application/json'})
+        return
     external_links.associate(flow.request.pretty_url,flow.request.headers.get('referer',''))
 
     # Local-only control endpoints: never forwarded upstream.
@@ -114,12 +125,15 @@ def request(flow:http.HTTPFlow):
             MISSING_ONLY=extra.get('missing_only')=='1';UPDATE_BOOK=str(book or '');UPDATE_UNTIL=time.monotonic()+600
         if kind=='lesson-active' and MISSING_ONLY:UPDATE_UNTIL=time.monotonic()+600
         if kind in ('book-done','book-incomplete'):MISSING_ONLY=False
+        if kind=="lesson-start":capture_completion.start(url)
         event(kind,book,lesson,url,extra)
         if kind in ("lesson-start","lesson-active"): set_active(book,lesson,url)
         elif kind in ("lesson-done","lesson-incomplete","book-done","book-incomplete"): clear_active()
         flow.response=http.Response.make(204,b"",{
             "Access-Control-Allow-Origin":"*","Cache-Control":"no-store"})
         return
+
+    capture_completion.watch(flow.request.pretty_url,flow.request.method,flow.request.headers.get('referer',''),getattr(flow,'id',id(flow)))
 
     if not getattr(flow,'metadata',{}).get('izzi_resume') and MISSING_ONLY and time.monotonic()<UPDATE_UNTIL and flow.request.method.upper()=='GET' and allowed(p.hostname):
         owner=re.search(r'/DOS/(\d+)/',p.path) or re.search(r'/DOS/(\d+)/',flow.request.headers.get('referer',''))
@@ -150,6 +164,7 @@ def request(flow:http.HTTPFlow):
         if recovering: print("[RECOVERY REQUEST]",canonical_url(flow.request.pretty_url))
 
 def response(flow:http.HTTPFlow):
+    capture_completion.finish(getattr(flow,'id',id(flow)))
     if flow.response is None or flow.response.headers.get("X-IZZI-Archive")=="1":return
     control=urlparse(flow.request.pretty_url)
     if control.hostname==SOURCE_HOST and control.path.startswith("/__offline_capture__/"):return
@@ -231,3 +246,7 @@ def response(flow:http.HTTPFlow):
             print("[LESSON]",bid,lid,lt);return
     print("[RECOVERED]" if recovering else ("[RANGE]" if status==206 else "[CAPTURE]"),
           status,len(data),cr or "",url)
+
+
+def error(flow:http.HTTPFlow):
+    capture_completion.finish(getattr(flow,'id',id(flow)))
