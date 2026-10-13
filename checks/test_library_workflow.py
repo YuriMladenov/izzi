@@ -413,6 +413,25 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertEqual(json.loads((self.state/'capture_session.json').read_text())['visits'][0]['book'],'3')
         self.assertEqual(self.request('/__book__/1')[0],404)
 
+    def test_youtube_links_play_local_video_and_reuse_download(self):
+        import youtube_download
+        identifier='abcdefghijk'
+        self.assertEqual(youtube_download.video_id('https://youtu.be/'+identifier),identifier)
+        self.assertEqual(youtube_download.video_id('https://www.youtube.com/watch?v='+identifier+'&feature=share'),identifier)
+        self.assertIsNone(youtube_download.video_id('https://evil.example/watch?v='+identifier))
+        escaped='https:\\/\\/www.youtube.com\\/embed\\/'+identifier
+        self.assertIn('/__offline__/external-media/'+identifier,server.rewrite(escaped.encode()).decode())
+        with patch.object(youtube_download,'ARCHIVE_DIR',self.archive),patch.object(youtube_download,'STATE_DIR',self.state),patch.object(youtube_download,'worker') as worker:
+            folder=self.archive/'youtube';folder.mkdir();video=folder/(identifier+'.mp4')
+            video.write_bytes(b'\x00\x00\x00\x18ftypisom'+b'x'*32)
+            self.assertTrue(youtube_download.status(identifier,start=True)['available']);worker.assert_not_called()
+            self.assertIn('/__offline__/external-media/'+identifier,server.rewrite(('<a href="https://www.youtube.com/watch?v='+identifier+'">video</a>').encode()).decode())
+            self.start_server()
+            page=self.request('/__offline__/external-media/'+identifier)[2].decode()
+            self.assertIn('<video controls',page)
+            self.assertEqual(self.request('/__offline__/youtube-video/'+identifier)[2],video.read_bytes())
+            self.assertEqual(self.request('/__offline__/youtube-video/'+identifier,headers={'Range':'bytes=0-7'})[0],206)
+
     def test_operations_owned_process_lifecycle_and_log(self):
         import operations,time
         tasks=operations.Tasks()

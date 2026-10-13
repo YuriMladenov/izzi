@@ -64,13 +64,16 @@ async function linkedApps(){
  const body=new Element('body'),events=[];
  class Frame extends Element{set src(value){this.contentDocument=null;queueMicrotask(()=>this.onload());}}
  const capture=vm.runInNewContext(helper+';captureLessonLinks',{URL,URLSearchParams,Map,AbortController,O:'https://bg.izzi.digital',console:{warn:()=>{}},document:{body,createElement:tag=>tag==='iframe'?new Frame(tag):new Element(tag)},fetch:async()=>({ok:true,json:async()=>({available:true,total:3})}),setTimeout:(f,ms)=>{if(ms!==30000)queueMicrotask(f);return 1;},clearTimeout:()=>{}});
- const html='<pkc v-bind:config=\'{"src":"./datastore/blocks/123/app.html","text":"<a href=\\"https://resources.example.org/app/index.html\\">Open</a>"}\'></pkc><script src="./not-a-linked-page.js"></script>';
+ const html='<a href="./9.html">Related lesson</a><a href="./datastore/notes/explanation.html">Explanation</a><a href="https://api.izzi.digital/datastore/15/publication/1/pictures/detail.png">Detail</a><pkc v-bind:config=\'{"src":"./datastore/blocks/123/app.html","text":"<a href=\\"https://resources.example.org/app/index.html\\">Open</a>"}\'></pkc><script src="./not-a-linked-page.js"></script>';
  const frame={contentDocument:{querySelectorAll:()=>[],documentElement:{outerHTML:html}}};
  const result=await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}));
- assert.equal(result.total,2);assert.equal(result.failed,0);
- assert.equal(events.filter(e=>e.kind==='link-register').length,2);
+ assert.equal(result.total,4);assert.equal(result.failed,0);
+ assert.equal(events.filter(e=>e.kind==='link-register').length,4);
  assert(events.some(e=>e.extra.asset==='https://bg.izzi.digital/DOS/1/datastore/blocks/123/app.html'));
  assert(events.some(e=>e.extra.asset==='https://resources.example.org/app/index.html'));
+ assert(!events.some(e=>e.extra.asset==='https://bg.izzi.digital/DOS/1/9.html'));
+ assert(events.some(e=>e.extra.asset.endsWith('/datastore/notes/explanation.html')));
+ assert(events.some(e=>e.extra.asset.endsWith('/pictures/detail.png')));
  assert(body.children.every(e=>e.removed));
 }
 async function images(){

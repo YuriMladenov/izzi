@@ -72,6 +72,14 @@ def rewrite(b,host=None):
              '/__offline__/youtube-api.js',t,flags=re.I)
     t=re.sub(r'(?:https?:)?//(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)/embed/',
              '/__offline__/external-media/',t,flags=re.I)
+    slash=r'(?:/|\\/)'
+    t=re.sub(r'https?:'+slash+slash+r'(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com)'+slash+r'(?:embed'+slash+r'|shorts'+slash+r'|watch\?v=)([A-Za-z0-9_-]{11})',lambda m:'/__offline__/external-media/'+m[1],t)
+    t=re.sub(r'https?:'+slash+slash+r'(?:www\.)?youtu\.be'+slash+r'([A-Za-z0-9_-]{11})',lambda m:'/__offline__/external-media/'+m[1],t)
+    import youtube_download
+    def youtube_link(match):
+        identifier=youtube_download.video_id(match[0])
+        return '/__offline__/external-media/'+identifier if identifier else match[0]
+    t=re.sub(r'(?:https?:)?//(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)/[^\s"\'<>\\]+',youtube_link,t)
     import external_links
     for external in external_links.hosts()|{'cdnjs.cloudflare.com'}:
         prefix='/__host__/'+external+'/'
@@ -463,7 +471,16 @@ class H(BaseHTTPRequestHandler):
             return self.sendb(webui.page(content,'Журнал','journal').encode(),'text/html; charset=utf-8')
         if p.path=="/__offline__/progress":
             return self.sendb(json.dumps(progress_journal.summarize(PROGRESS_DIR),ensure_ascii=False).encode(),"application/json")
+        if p.path.startswith('/__offline__/youtube-video/'):
+            import youtube_download
+            identifier=p.path.rsplit('/',1)[-1];video=youtube_download.local_file(identifier)
+            if not video:return self.sendb(b'Video not downloaded','text/plain',404)
+            return self.sendfile(video,'video/mp4' if video.suffix=='.mp4' else 'video/webm')
         if p.path.startswith("/__offline__/external-media/"):
+            import youtube_download
+            identifier=p.path.rsplit('/',1)[-1]
+            if youtube_download.local_file(identifier):
+                return self.sendb(('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#000}video{width:100%;height:100vh}</style><video controls playsinline src="/__offline__/youtube-video/'+identifier+'"></video>').encode(),'text/html; charset=utf-8')
             return self.sendb('<!doctype html><meta charset="utf-8"><p>Външното видео не е включено в офлайн архива.</p>'.encode(),"text/html; charset=utf-8")
         if p.path=="/__missing__":
             events=[];seen=set();f=missing_log()

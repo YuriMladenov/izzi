@@ -29,6 +29,12 @@ def request(flow:http.HTTPFlow):
     global MISSING_ONLY,UPDATE_BOOK,UPDATE_UNTIL
     p=urlparse(flow.request.pretty_url)
 
+    if p.hostname==SOURCE_HOST and p.path=="/__offline_capture__/youtube":
+        import youtube_download
+        q=parse_qs(p.query);identifier=(q.get('id') or [''])[0]
+        data=youtube_download.status(identifier,start=q.get('start')==['1'])
+        flow.response=http.Response.make(200,json.dumps(data).encode(),{'Content-Type':'application/json','Cache-Control':'no-store'})
+        return
     if p.hostname==SOURCE_HOST and p.path=="/__offline_capture__/link_status":
         target=(parse_qs(p.query).get('url') or [''])[0]
         data=external_links.status(target,load_json(URL_MAP_FILE,{}),ARCHIVE_DIR)

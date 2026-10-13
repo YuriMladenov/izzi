@@ -25,7 +25,10 @@ def plan(book,state,archive):
     removed={r['key'] for url in urls for r in mapping[url] if r.get('key')}
     retained={r['key'] for url,rows in mapping.items() if url not in urls for r in rows if r.get('key')}
     retained_paths={(archive/key).resolve() for key in retained}
-    files=[]
+    import youtube_download
+    own_videos={youtube_download.video_id(url) for url in mine if url}
+    shared_videos={youtube_download.video_id(url) for url in others if url}
+    files=[path for identifier in own_videos-shared_videos if identifier for path in (archive/'youtube').glob(identifier+'.*') if path.is_file() and path.resolve().is_relative_to(archive.resolve())]
     for key in removed-retained:
         path=(archive/key).resolve()
         if path not in retained_paths and path.is_relative_to(archive.resolve()) and path.is_file():files.append(path)
@@ -48,7 +51,10 @@ def remove(book,state,archive):
         media['lessons']={key:value for key,value in media.get('lessons',{}).items() if not re.search(r'/DOS/'+book+r'/|^'+book+r'[:/]',key)}
         if str(active.get('book'))==book:active={}
         for name,data in [('books.json',books),('url_map.json',mapping),('library_catalog.json',prefs),('capture_session.json',session),('media_map.json',media),('capture_observed.json',observed),('lesson_links.json',links),('active_lesson.json',active)]:save(state/name,data)
-        for path in result['files']:path.unlink(missing_ok=True)
+        for path in result['files']:
+            path.unlink(missing_ok=True)
+            if path.parent.name=='youtube':
+                for suffix in ('.json','.log'):(state/'youtube'/(path.name.split('.')[0]+suffix)).unlink(missing_ok=True)
         (state/'progress'/(book+'.jsonl')).unlink(missing_ok=True)
         for manifest in result['ranges']:
             work=manifest.with_suffix('')
