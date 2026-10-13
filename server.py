@@ -75,6 +75,17 @@ def rewrite(b,host=None):
     slash=r'(?:/|\\/)'
     t=re.sub(r'https?:'+slash+slash+r'(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com)'+slash+r'(?:embed'+slash+r'|shorts'+slash+r'|watch\?v=)([A-Za-z0-9_-]{11})',lambda m:'/__offline__/external-media/'+m[1],t)
     t=re.sub(r'https?:'+slash+slash+r'(?:www\.)?youtu\.be'+slash+r'([A-Za-z0-9_-]{11})',lambda m:'/__offline__/external-media/'+m[1],t)
+    def youtube_component(match):
+        class Attributes(HTMLParser):
+            values={}
+            def handle_starttag(self,tag,attrs):self.values=dict(attrs)
+        parser=Attributes();parser.feed('<youtube-player '+match[1]+'>')
+        identifier=parser.values.get('video-id','')
+        if not re.fullmatch(r'[A-Za-z0-9_-]{11}',identifier):return '<p>Невалиден YouTube видео адрес.</p>'
+        title=html.escape(parser.values.get('title',''))
+        description=html.escape(re.sub(r'<[^>]*>',' ',html.unescape(parser.values.get('description',''))))
+        return '<section class="offline-youtube" data-youtube-id="'+identifier+'">'+('<h3>'+title+'</h3>' if title else '')+('<p>'+description+'</p>' if description.strip() else '')+'<iframe title="'+(title or 'Видео')+'" src="/__offline__/external-media/'+identifier+'" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen loading="lazy"></iframe></section>'
+    t=re.sub(r'<youtube-player\b([^>]*?)>[\s\S]*?</youtube-player\s*>',youtube_component,t,flags=re.I)
     import youtube_download
     def youtube_link(match):
         identifier=youtube_download.video_id(match[0])

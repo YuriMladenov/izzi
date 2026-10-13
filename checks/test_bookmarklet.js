@@ -75,6 +75,12 @@ async function linkedApps(){
  assert(events.some(e=>e.extra.asset.endsWith('/datastore/notes/explanation.html')));
  assert(events.some(e=>e.extra.asset.endsWith('/pictures/detail.png')));
  assert(body.children.every(e=>e.removed));
+ frame.contentDocument.documentElement.outerHTML='<youtube-player video-id="abcdefghijk"></youtube-player>';
+ events.length=0;const youtubeResult=await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}));
+ assert.equal(youtubeResult.failed,0);assert(events.some(e=>e.kind==='youtube-checked'&&e.extra.asset.endsWith('abcdefghijk')));
+ frame.contentDocument.querySelector=()=>({outerHTML:'<div>visible content</div>'});frame.contentDocument.documentElement.outerHTML='<script>{"youtube":{"videoId":"abcdefghijk"}}</script>';events.length=0;
+ await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}));
+ assert(events.some(e=>e.kind==='youtube-checked'));
 }
 async function images(){
  const helper=source.slice(source.indexOf('async function captureLessonImages'),source.indexOf("await ping('book-start',location);"));
