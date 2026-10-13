@@ -364,6 +364,24 @@ class LibraryWorkflow(unittest.TestCase):
             capture_addon.response(private)
             self.assertNotIn(private.request.pretty_url,json.loads((self.state/'url_map.json').read_text()))
 
+    def test_missing_only_reuses_complete_assets_and_requests_missing_ones(self):
+        try:
+            import capture_addon
+            from mitmproxy import http
+        except ImportError:self.skipTest('capture dependencies not installed')
+        import external_links,time
+        from types import SimpleNamespace
+        self.add('/DOS/1/app.js',b'archived()',content_type='application/javascript')
+        with patch.multiple(capture_addon,MISSING_ONLY=True,UPDATE_BOOK='1',UPDATE_UNTIL=time.monotonic()+60,ARCHIVE_DIR=self.archive,URL_MAP_FILE=self.state/'url_map.json'), patch.object(external_links,'FILE',self.state/'lesson_links.json'):
+            def request(path):
+                flow=SimpleNamespace(request=http.Request.make('GET','https://bg.izzi.digital'+path),response=None)
+                capture_addon.request(flow);return flow.response
+            self.assertEqual(request('/DOS/1/app.js').content,b'archived()')
+            self.assertIsNone(request('/DOS/1/missing.js'))
+            self.assertIsNone(request('/DOS/2/app.js'))
+            self.assertIsNone(request('/api/account.json'))
+            with patch.object(capture_addon,'UPDATE_UNTIL',0):self.assertIsNone(request('/DOS/1/app.js'))
+
     def test_operations_owned_process_lifecycle_and_log(self):
         import operations,time
         tasks=operations.Tasks()

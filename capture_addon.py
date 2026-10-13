@@ -1,4 +1,4 @@
-import hashlib,mimetypes,json
+import hashlib,mimetypes,json,re,time
 from pathlib import Path
 from urllib.parse import urlparse,parse_qs,urljoin
 from mitmproxy import http
@@ -14,6 +14,11 @@ from cache_bust_recovery import canonical_url,is_recovery_url,note as note_recov
 
 import external_links
 
+MISSING_ONLY=False
+UPDATE_BOOK=''
+UPDATE_UNTIL=0
+STATIC_EXT={'.html','.htm','.js','.css','.json','.svg','.png','.jpg','.jpeg','.gif','.webp','.woff','.woff2','.ttf','.mp4','.mp3','.webm','.pdf','.sb3','.sb2','.zip','.exe'}
+
 MAX_BODY=250*1024*1024
 
 def allowed(host):
@@ -21,6 +26,7 @@ def allowed(host):
     return h=="izzi.digital" or h.endswith(".izzi.digital") or h in external_links.hosts() or h=="cdnjs.cloudflare.com"
 
 def request(flow:http.HTTPFlow):
+    global MISSING_ONLY,UPDATE_BOOK,UPDATE_UNTIL
     p=urlparse(flow.request.pretty_url)
 
     if p.hostname==SOURCE_HOST and p.path=="/__offline_capture__/link_status":
@@ -60,17 +66,39 @@ def request(flow:http.HTTPFlow):
         q=parse_qs(p.query); kind=(q.get("kind") or ["event"])[0]
         book=(q.get("book") or [None])[0]; lesson=(q.get("lesson") or [None])[0]
         url=(q.get("url") or [None])[0]
-        extra={k:v[0] for k,v in q.items() if k in ("asset","reason","total","failed","title","number","module","section","order")}
+        extra={k:v[0] for k,v in q.items() if k in ("asset","reason","total","failed","title","number","module","section","order","missing_only")}
         if kind=='link-register':
             try:external_links.register(extra.get('asset',''))
             except ValueError:
                 flow.response=http.Response.make(400,b'Unsupported external link');return
+        if kind=='book-start':MISSING_ONLY=False
+        if kind=='update-mode':
+            MISSING_ONLY=extra.get('missing_only')=='1';UPDATE_BOOK=str(book or '');UPDATE_UNTIL=time.monotonic()+600
+        if kind=='lesson-active' and MISSING_ONLY:UPDATE_UNTIL=time.monotonic()+600
+        if kind in ('book-done','book-incomplete'):MISSING_ONLY=False
         event(kind,book,lesson,url,extra)
         if kind in ("lesson-start","lesson-active"): set_active(book,lesson,url)
         elif kind in ("lesson-done","lesson-incomplete","book-done","book-incomplete"): clear_active()
         flow.response=http.Response.make(204,b"",{
             "Access-Control-Allow-Origin":"*","Cache-Control":"no-store"})
         return
+
+    if MISSING_ONLY and time.monotonic()<UPDATE_UNTIL and flow.request.method.upper()=='GET' and allowed(p.hostname):
+        owner=re.search(r'/DOS/(\d+)/',p.path) or re.search(r'/DOS/(\d+)/',flow.request.headers.get('referer',''))
+        scoped=(owner and owner[1]==UPDATE_BOOK) or (not owner and p.path.startswith(('/datastore/','/profil/','/assets/','/_nuxt/'))) or (p.hostname in external_links.hosts() and not p.hostname.endswith('izzi.digital'))
+        ext=Path(p.path).suffix.lower()
+        if scoped and ext in STATIC_EXT and not p.path.startswith('/api/'):
+            mapping=load_json(URL_MAP_FILE,{})
+            row=find(mapping,p.hostname,p.path,p.query,lambda r:usable_body(r,ARCHIVE_DIR,ext) and r.get('decoded',False))
+            if row:
+                data=(ARCHIVE_DIR/row['key']).read_bytes();headers={'Content-Type':row.get('content_type') or 'application/octet-stream','Cache-Control':'no-store','X-IZZI-Archive':'1'};status=200
+                byte_range=re.fullmatch(r'bytes=(\d*)-(\d*)',flow.request.headers.get('range',''))
+                if byte_range and data:
+                    size=len(data);a,b=byte_range.groups();start=int(a) if a else max(0,size-int(b or size));end=min(size-1,int(b) if a and b else size-1)
+                    if start<=end and start<size:data=data[start:end+1];status=206;headers['Content-Range']=f'bytes {start}-{end}/{size}'
+                flow.response=http.Response.make(status,data,headers)
+                print('[ARCHIVE REUSE]',p.path)
+                return
 
     if allowed(p.hostname) and flow.request.method.upper() in ("GET","HEAD"):
         recovering=is_recovery_url(flow.request.pretty_url)
@@ -84,7 +112,7 @@ def request(flow:http.HTTPFlow):
         if recovering: print("[RECOVERY REQUEST]",canonical_url(flow.request.pretty_url))
 
 def response(flow:http.HTTPFlow):
-    if flow.response is None:return
+    if flow.response is None or flow.response.headers.get("X-IZZI-Archive")=="1":return
     control=urlparse(flow.request.pretty_url)
     if control.hostname==SOURCE_HOST and control.path.startswith("/__offline_capture__/"):return
     request_url=flow.request.pretty_url.split("#",1)[0]
