@@ -123,6 +123,25 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertIn('<h2>Уроци без записан раздел</h2>',page)
         self.assertIn('Older lesson',page)
 
+    def test_manual_section_and_original_number_and_automatic_preview(self):
+        import html
+        self.write('books.json',{'1':{'title':'Book','lessons':{
+            '10':{'title':'Chapter','path':'/DOS/1/10.html'},'2':{'title':'Old title','path':'/DOS/1/2.html'}}}})
+        breadcrumbs=html.escape(json.dumps([{'id':10,'name':'Земята','systemType':'module','prettyPosition':'3'}]),quote=True)
+        unit=html.escape(json.dumps({'id':2,'name':'Форма на Земята'}),quote=True)
+        self.add('/DOS/1/10.html',('<breadcrumbs :items="'+breadcrumbs+'"></breadcrumbs><units-list-item :item="'+unit+'" position="3.1." title="Форма на Земята"></units-list-item>').encode())
+        self.start_server()
+        preview=self.request('/__book__/1?edit=1&auto=1')[2].decode()
+        self.assertIn('value="Земята"',preview);self.assertIn('value="3.1."',preview)
+        self.assertIn('Форма на Земята',preview)
+        self.assertFalse((self.state/'library_catalog.json').exists())
+        from urllib.parse import urlencode
+        body=urlencode({'name_2':'Нов урок','module_2':'Първи срок','number_2':'2.1.','order_2':'1'}).encode()
+        self.assertEqual(self.request('/__catalog__/1',body,{'Content-Type':'application/x-www-form-urlencoded'})[0],200)  # follows redirect
+        page=self.request('/__book__/1')[2].decode()
+        self.assertIn('<h2>Първи срок</h2>',page);self.assertIn('2.1. Нов урок',page)
+        self.assertEqual(self.request('/__book__/1?edit=1&auto=1',headers={'Host':'192.168.1.20'})[0],403)
+
     def completed(self,count=2):
         # Metadata misses two historical lessons; visits+map restore the union.
         self.write('books.json',{'1':{'lessons':{str(i):{} for i in range(max(0,count-2))}}})
@@ -293,6 +312,57 @@ class LibraryWorkflow(unittest.TestCase):
         import operations
         with patch.object(operations.sys,'executable',str(self.root/'absent/python.exe')), patch.object(operations.sysconfig,'get_path',return_value=str(self.root/'absent/Scripts')), patch.object(operations.shutil,'which',return_value=None):
             with self.assertRaisesRegex(ValueError,'рестартирай библиотеката'):operations.find_mitmdump()
+
+    def test_link_dependencies_and_external_replay(self):
+        import external_links
+        with patch.object(external_links,'FILE',self.state/'lesson_links.json'):
+            root='https://resources.example.org/app/index.html'
+            external_links.register(root)
+            external_links.associate('https://resources.example.org/assets/app.js',root)
+            external_links.associate('https://cdn.example.org/data.json','https://resources.example.org/assets/app.js')
+            self.assertEqual(external_links.hosts(),{'resources.example.org','cdn.example.org'})
+            external_links.discover(root,b'<script src="/assets/app.js"></script>', 'text/html')
+            external_links.associate('https://origin-cdn.example.org/library.css','https://resources.example.org/')
+            self.add('https://origin-cdn.example.org/library.css',b'body{}',content_type='text/css')
+            self.assertIn('origin-cdn.example.org',external_links.hosts())
+            self.add(root,b'<html><script src="/assets/app.js"></script><a href="https://cdn.example.org/data.json">data</a></html>')
+            self.add('https://resources.example.org/assets/app.js',b'fetch("/data.json")',content_type='application/javascript')
+            self.assertFalse(external_links.status(root,self.mapping,self.archive)['available'])
+            self.add('https://cdn.example.org/data.json',b'{}',content_type='application/json')
+            self.assertTrue(external_links.status(root,self.mapping,self.archive)['available'])
+            self.start_server()
+            page=self.request('/__host__/resources.example.org/app/index.html')[2].decode()
+            self.assertIn('src="/__host__/resources.example.org/assets/app.js"',page)
+            self.assertIn('href="/__host__/cdn.example.org/data.json"',page)
+            self.assertEqual(self.request('/__host__/resources.example.org/assets/app.js')[2],b'fetch("/__host__/resources.example.org/data.json")')
+            redirect='https://resources.example.org/start'
+            external_links.register(redirect)
+            self.add(redirect,b'',status=302,location='/app/index.html')
+            self.assertTrue(external_links.status(redirect,self.mapping,self.archive)['available'])
+            self.assertEqual(self.request('/__host__/resources.example.org/start')[0],200)  # urllib follows the local redirect
+            for url in ('http://127.0.0.1/admin','http://localhost/admin','https://www.google-analytics.com/collect','file:///secret'):
+                with self.assertRaises(ValueError):external_links.register(url)
+
+    def test_capture_proxy_records_external_app_dependencies(self):
+        import external_links
+        try:
+            import capture_addon
+            from mitmproxy import http
+        except ImportError:self.skipTest('capture dependencies not installed')
+        from types import SimpleNamespace
+        root='https://resources.example.org/app/index.html'
+        with patch.object(external_links,'FILE',self.state/'lesson_links.json'), patch.multiple(capture_addon,ARCHIVE_DIR=self.archive,STATE_DIR=self.state,URL_MAP_FILE=self.state/'url_map.json'), patch.object(capture_addon,'observe'), patch.object(capture_addon,'event'):
+            external_links.register(root)
+            flow=SimpleNamespace(request=http.Request.make('GET',root),response=http.Response.make(200,b'<script src="https://cdn.example.org/app.js"></script>',{'Content-Type':'text/html'}))
+            capture_addon.request(flow);capture_addon.response(flow)
+            self.assertIn('cdn.example.org',external_links.hosts())
+            script=SimpleNamespace(request=http.Request.make('GET','https://cdn.example.org/app.js',headers={'Referer':'https://resources.example.org/'}),response=http.Response.make(200,b'console.log("app")',{'Content-Type':'application/javascript'}))
+            capture_addon.request(script);capture_addon.response(script)
+            mapping=json.loads((self.state/'url_map.json').read_text())
+            self.assertTrue(external_links.status(root,mapping,self.archive)['available'])
+            private=SimpleNamespace(request=http.Request.make('POST','https://resources.example.org/api/save',content=b'private'),response=http.Response.make(200,b'private'))
+            capture_addon.response(private)
+            self.assertNotIn(private.request.pretty_url,json.loads((self.state/'url_map.json').read_text()))
 
     def test_operations_owned_process_lifecycle_and_log(self):
         import operations,time

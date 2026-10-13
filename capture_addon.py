@@ -1,6 +1,6 @@
 import hashlib,mimetypes,json
 from pathlib import Path
-from urllib.parse import urlparse,parse_qs
+from urllib.parse import urlparse,parse_qs,urljoin
 from mitmproxy import http
 from config import *
 from import_har import load as load_json,save,metadata,RX
@@ -12,14 +12,23 @@ from active_lesson import set_active, clear as clear_active
 from replay_resolver import find,usable_body
 from cache_bust_recovery import canonical_url,is_recovery_url,note as note_recovery
 
+import external_links
+
 MAX_BODY=250*1024*1024
 
 def allowed(host):
     h=(host or "").lower()
-    return h=="izzi.digital" or h.endswith(".izzi.digital")
+    return h=="izzi.digital" or h.endswith(".izzi.digital") or h in external_links.hosts() or h=="cdnjs.cloudflare.com"
 
 def request(flow:http.HTTPFlow):
     p=urlparse(flow.request.pretty_url)
+
+    if p.hostname==SOURCE_HOST and p.path=="/__offline_capture__/link_status":
+        target=(parse_qs(p.query).get('url') or [''])[0]
+        data=external_links.status(target,load_json(URL_MAP_FILE,{}),ARCHIVE_DIR)
+        flow.response=http.Response.make(200,json.dumps(data).encode(),{'Content-Type':'application/json','Cache-Control':'no-store'})
+        return
+    external_links.associate(flow.request.pretty_url,flow.request.headers.get('referer',''))
 
     # Local-only control endpoints: never forwarded upstream.
     if p.hostname==SOURCE_HOST and p.path=="/__offline_capture__/image_status":
@@ -52,6 +61,10 @@ def request(flow:http.HTTPFlow):
         book=(q.get("book") or [None])[0]; lesson=(q.get("lesson") or [None])[0]
         url=(q.get("url") or [None])[0]
         extra={k:v[0] for k,v in q.items() if k in ("asset","reason","total","failed","title","number","module","section","order")}
+        if kind=='link-register':
+            try:external_links.register(extra.get('asset',''))
+            except ValueError:
+                flow.response=http.Response.make(400,b'Unsupported external link');return
         event(kind,book,lesson,url,extra)
         if kind in ("lesson-start","lesson-active"): set_active(book,lesson,url)
         elif kind in ("lesson-done","lesson-incomplete","book-done","book-incomplete"): clear_active()
@@ -85,11 +98,14 @@ def response(flow:http.HTTPFlow):
     except Exception as e: print("[OBSERVE ERROR]",e)
 
     if not allowed(flow.request.host):return
+    if not (flow.request.host=="izzi.digital" or flow.request.host.endswith(".izzi.digital")) and flow.request.method.upper() not in ("GET","HEAD"):return
     status=flow.response.status_code
     if status==304:
         if recovering: note_recovery(url,status,0)
         print("[CACHE 304]",url);return
 
+    if 300<=status<400 and flow.response.headers.get('location'):
+        external_links.associate(urljoin(url,flow.response.headers['location']),url)
     p=urlparse(url);ct=flow.response.headers.get("content-type","")
     is_mp4=p.path.lower().endswith(".mp4") or ct.lower().startswith("video/mp4")
     cr=flow.response.headers.get("content-range")
@@ -122,6 +138,8 @@ def response(flow:http.HTTPFlow):
          "method":flow.request.method,"size":len(data),
          "source":"cache_bust_recovery_v3.3.3" if recovering else "capture_proxy_v3.2",
          "decoded":decoded}
+    external_links.discover(url,data,ct)
+    if flow.response.headers.get("location"):rec["location"]=flow.response.headers["location"]
     if cr:rec["content_range"]=cr
     if flow.request.headers.get("range"):rec["request_range"]=flow.request.headers["range"]
     arr=mp.setdefault(url,[]);sig=(key,flow.request.method,status,cr)

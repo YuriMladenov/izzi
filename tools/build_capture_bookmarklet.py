@@ -9,3 +9,10 @@ helper = ''.join((root / 'capture_navigation.js').read_text(encoding='utf-8').sp
 prefix, remainder = source.split(start, 1)
 _, suffix = remainder.split(end, 1)
 path.write_text(prefix + start + helper + end + suffix, encoding='utf-8')
+
+source=path.read_text(encoding="utf-8")
+start,end="/*IZZI_LINKS_START*/","/*IZZI_LINKS_END*/"
+prefix,remainder=source.split(start,1)
+_,suffix=remainder.split(end,1)
+helper="".join((root/"capture_links.js").read_text(encoding="utf-8").splitlines())
+path.write_text(prefix+start+helper+end+suffix,encoding="utf-8")

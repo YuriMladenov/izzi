@@ -57,6 +57,21 @@ async function navigation(){
  const cancelled=await collect(doc,'https://bg.izzi.digital/DOS/1/0.html','1',fetchPage,async()=>null);
  assert.equal(cancelled.length,0);
 }
+async function linkedApps(){
+ const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_links.js'),'utf8');
+ assert.equal(source.split('/*IZZI_LINKS_START*/')[1].split('/*IZZI_LINKS_END*/')[0],helper.split(/\r?\n/).join(''));
+ const body=new Element('body'),events=[];
+ class Frame extends Element{set src(value){this.contentDocument=null;queueMicrotask(()=>this.onload());}}
+ const capture=vm.runInNewContext(helper+';captureLessonLinks',{URL,URLSearchParams,Map,AbortController,O:'https://bg.izzi.digital',console:{warn:()=>{}},document:{body,createElement:tag=>tag==='iframe'?new Frame(tag):new Element(tag)},fetch:async()=>({ok:true,json:async()=>({available:true,total:3})}),setTimeout:(f,ms)=>{if(ms!==30000)queueMicrotask(f);return 1;},clearTimeout:()=>{}});
+ const html='<pkc v-bind:config=\'{"src":"./datastore/blocks/123/app.html","text":"<a href=\\"https://resources.example.org/app/index.html\\">Open</a>"}\'></pkc><script src="./not-a-linked-page.js"></script>';
+ const frame={contentDocument:{querySelectorAll:()=>[],documentElement:{outerHTML:html}}};
+ const result=await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}));
+ assert.equal(result.total,2);assert.equal(result.failed,0);
+ assert.equal(events.filter(e=>e.kind==='link-register').length,2);
+ assert(events.some(e=>e.extra.asset==='https://bg.izzi.digital/DOS/1/datastore/blocks/123/app.html'));
+ assert(events.some(e=>e.extra.asset==='https://resources.example.org/app/index.html'));
+ assert(body.children.every(e=>e.removed));
+}
 async function images(){
  const helper=source.slice(source.indexOf('async function captureLessonImages'),source.indexOf("await ping('book-start',location);"));
  const urls=[],events=[];let archived=true;
@@ -103,4 +118,4 @@ async function media(){
  assert.equal((await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}))).failed,2);
  assert.equal(events.filter(e=>e.kind==='media-failed').length,2);
 }
-(async()=>{await media();await attachments();await images();await run(false);await navigation();await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});
+(async()=>{await media();await attachments();await images();await run(false);await navigation();await linkedApps();await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});

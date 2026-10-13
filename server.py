@@ -46,7 +46,7 @@ def usable_font(r):
 def usable_image(r):
     return usable_body(r,ARCHIVE_DIR,'.png')
 
-def rewrite(b):
+def rewrite(b,host=None):
     # Called ONLY for already-decoded textual resources.
     t=b.decode("utf-8",errors="strict")
     pairs=(("https://bg.izzi.digital/","/"),("http://bg.izzi.digital/","/"),
@@ -72,6 +72,15 @@ def rewrite(b):
              '/__offline__/youtube-api.js',t,flags=re.I)
     t=re.sub(r'(?:https?:)?//(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)/embed/',
              '/__offline__/external-media/',t,flags=re.I)
+    import external_links
+    for external in external_links.hosts()|{'cdnjs.cloudflare.com'}:
+        prefix='/__host__/'+external+'/'
+        for origin in ('https://'+external+'/', 'http://'+external+'/', '//'+external+'/'):
+            t=t.replace(origin,prefix).replace(origin.replace('/','\\/'),prefix.replace('/','\\/'))
+    if host and not _izzi_host(host):
+        prefix='/__host__/'+host+'/'
+        t=re.sub(r'(["\'])/(?!/|__host__/)([^"\']+)',lambda m:m[1]+prefix+m[2],t)
+        t=re.sub(r'url\(\s*/(?!/|__host__/)', 'url('+prefix,t,flags=re.I)
     return t.encode("utf-8")
 
 def bad_media_source(value):
@@ -299,6 +308,13 @@ class H(BaseHTTPRequestHandler):
         # Retain real upstream errors when there is no usable body alternative.
         if not r and usable:
             error=find(m,host,path,q,None,book)
+            if error and 300<=error.get('status',0)<400 and error.get('location'):
+                from urllib.parse import urljoin
+                import external_links
+                target=urlparse(urljoin('https://'+host+path,error['location']))
+                if external_links.valid_url(target.geturl()):
+                    local=(target.path if target.hostname==SOURCE_HOST else '/__host__/'+target.netloc+target.path)+('?' + target.query if target.query else '')+('#'+target.fragment if target.fragment else '')
+                    return self.sendb(b'', 'text/plain',error['status'],extra={'Location':local})
             if error and error.get('status')==206 and not complete_body(error) and ext in MEDIA_EXT:
                 return self.sendb(b"Incomplete captured media range","text/plain; charset=utf-8",409)
             if error and int(error.get("status",200))>=400:
@@ -331,7 +347,7 @@ class H(BaseHTTPRequestHandler):
             return self.sendb(b,ct,extra={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(Path(unquote(path)).name,safe='')})
         if mime.startswith("text/") or mime in TEXT or "javascript" in mime:
             try:
-                b=rewrite(b)
+                b=rewrite(b,host)
                 if path.lower().endswith(".html"): b=inject_media_map(b,path)
             except UnicodeDecodeError:
                 print("[BAD TEXT BLOB]",r["key"],path)
@@ -390,12 +406,18 @@ class H(BaseHTTPRequestHandler):
                 ls=library_catalog.ordered_lessons(bid,b,session,preferences)
             except (OSError,ValueError,TypeError,AttributeError):
                 return self.sendb(b'Library settings unavailable','text/plain',503)
-            if p.query=='edit=1':
+            if parse_qs(p.query).get('edit')==['1']:
+                automatic=parse_qs(p.query).get('auto')==['1']
+                if automatic:
+                    import catalog_restore
+                    ls=catalog_restore.restore(bid,ls,m,ARCHIVE_DIR)
                 rows=[]
                 for index,x in enumerate(ls,1):
                     lid=html.escape(x['id'],quote=True)
-                    rows.append('<tr><td>%s</td><td><input type="number" name="order_%s" value="%d" required></td><td><input name="name_%s" value="%s" maxlength="300"></td><td><input type="checkbox" name="hidden_%s" %s></td></tr>'%(lid,lid,index,lid,html.escape(x['title'],quote=True),lid,'checked' if x['hidden'] else ''))
-                page='<!doctype html><meta charset="utf-8"><h1>Подреждане на уроци</h1><p>По-малкият номер се показва по-рано. Скриването запазва архивираните файлове и директните адреси на уроците.</p><form method="post" action="/__catalog__/%s"><table><tr><th>ID</th><th>Ред</th><th>Име</th><th>Скрит</th></tr>%s</table><button>Запази</button></form><p><a href="/__book__/%s">Назад</a></p>'%(html.escape(bid),''.join(rows),html.escape(bid))
+                    rows.append('<tr><td>%s</td><td><input type="number" name="order_%s" value="%d" required></td><td><input name="name_%s" value="%s" maxlength="300"></td><td><input name="module_%s" value="%s" maxlength="300"></td><td><input name="number_%s" value="%s" maxlength="40"></td><td><input type="checkbox" name="hidden_%s" %s></td></tr>'%(lid,lid,index,lid,html.escape(x['title'],quote=True),lid,html.escape(x.get('module',''),quote=True),lid,html.escape(x.get('original_number',''),quote=True),lid,'checked' if x['hidden'] else ''))
+                page='<!doctype html><meta charset="utf-8"><h1>Подреждане на уроци</h1><p>По-малкият номер се показва по-рано. Скриването запазва архивираните файлове и директните адреси на уроците.</p><form method="post" action="/__catalog__/%s"><table><tr><th>ID</th><th>Ред</th><th>Име</th><th>Раздел</th><th>Оригинален номер</th><th>Скрит</th></tr>%s</table><button>Запази</button></form><p><a href="/__book__/%s">Назад</a></p>'%(html.escape(bid),''.join(rows),html.escape(bid))
+                notice='<p>Автоматично предложение от архива. Провери полетата и натисни „Запази“. Ако няма данни за раздел, попълни го ръчно.</p>' if automatic else '<p><a class="download" href="?edit=1&amp;auto=1">Предложи имена и раздели от архива</a></p>'
+                page=page.replace('<form ',notice+'<form ',1)
                 page=page.replace('<table>','<div class="table-wrap"><table>').replace('</table>','</table></div>')
                 return self.sendb(webui.page(page,'Подреждане').encode(),'text/html; charset=utf-8')
             groups={}
