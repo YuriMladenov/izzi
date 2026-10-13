@@ -69,3 +69,5 @@
 .book-thumbnail.palette50 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#9a6f00,#d9352f)}
 .book-thumbnail.palette51 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#086086,#07424e)}
 .book-thumbnail.palette52 .cover-tile{background-image:radial-gradient(circle at 12% 35%,#648027,#1f8904)}
+
+.cleanup-options{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.cleanup-options label{display:flex;align-items:center;gap:9px}.cleanup-options>button{margin-top:0}

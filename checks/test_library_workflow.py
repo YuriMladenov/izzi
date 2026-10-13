@@ -484,6 +484,74 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertEqual(self.request(path,headers={'Range':'bytes=2-5','If-Range':'"old-version"'})[2],data)
         self.assertEqual(self.request(path,headers={'If-None-Match':tag})[0],304)
 
+    def test_cleanup_preserves_shared_files_and_incomplete_parts_and_restores(self):
+        import archive_cleanup,time
+        clock=patch.object(archive_cleanup,'now',return_value=time.time()+600);clock.start();self.patches.append(clock)
+        self.write('books.json',{})
+        video=b'\x00\x00\x00\x18ftypisom'+b'x'*40
+        url='https://bg.izzi.digital/DOS/1/movie.mp4'
+        record=self.add(url,video,content_type='video/mp4',complete=True)
+        self.add('/DOS/2/movie.mp4',video,content_type='video/mp4',complete=True)
+        blobs=self.archive/'blobs';blobs.mkdir()
+        orphan=blobs/(hashlib.sha256(b'orphan').hexdigest()+'.bin');orphan.write_bytes(b'orphan')
+        def ranges(target,total,body):
+            identity=hashlib.sha256(target.encode()).hexdigest();folder=self.state/'range_assembly'/identity;folder.mkdir(parents=True)
+            part=folder/('0-'+str(len(body)-1)+'.part');part.write_bytes(body)
+            self.write('range_assembly/'+identity+'.json',{'url':target,'total':total,'ranges':[[0,len(body)-1,str(part)]]})
+            return part
+        completed=ranges(url,len(video),video)
+        unfinished=ranges('https://bg.izzi.digital/DOS/1/unfinished.mp4',100,b'abc')
+        result=archive_cleanup.report(self.archive,self.state)
+        paths={entry['path'] for entry in result['files']}
+        self.assertIn(orphan.relative_to(self.archive).as_posix(),paths)
+        self.assertIn(completed.relative_to(self.state).as_posix(),paths)
+        self.assertNotIn(unfinished.relative_to(self.state).as_posix(),paths)
+        self.write('library_catalog.json',{})
+        with self.assertRaisesRegex(ValueError,'променен'):archive_cleanup.quarantine(self.archive,self.state,result['fingerprint'])
+        result=archive_cleanup.report(self.archive,self.state)
+        batch=archive_cleanup.quarantine(self.archive,self.state,result['fingerprint'])
+        self.assertFalse(orphan.exists());self.assertFalse(completed.exists());self.assertTrue(unfinished.exists())
+        self.assertTrue((self.archive/record['key']).exists())
+        orphan.write_bytes(b'new content')
+        with self.assertRaisesRegex(ValueError,'Вече има файл'):archive_cleanup.restore(self.archive,self.state,batch)
+        self.assertFalse(completed.exists())
+        orphan.unlink()
+        archive_cleanup.restore(self.archive,self.state,batch)
+        self.assertTrue(orphan.exists());self.assertTrue(completed.exists())
+        trash=archive_cleanup.trash_report(self.state,batch)
+        manifest=json.loads((self.state/'cleanup_trash'/batch/'manifest.json').read_text());manifest['changed']=True
+        self.write('cleanup_trash/'+batch+'/manifest.json',manifest)
+        with self.assertRaisesRegex(ValueError,'променена'):archive_cleanup.purge(self.state,batch,trash['fingerprint'])
+        trash=archive_cleanup.trash_report(self.state,batch)
+        archive_cleanup.purge(self.state,batch,trash['fingerprint'])
+        self.assertFalse((self.state/'cleanup_trash'/batch).exists())
+        self.assertIn(unfinished.relative_to(self.state).as_posix(),{e['path'] for e in archive_cleanup.report(self.archive,self.state,True)['files']})
+
+    def test_cleanup_is_local_and_requires_review_and_valid_indexes(self):
+        import archive_cleanup,operations,time
+        clock=patch.object(archive_cleanup,'now',return_value=time.time()+600);clock.start();self.patches.append(clock)
+        self.write('books.json',{});self.write('url_map.json',{})
+        blobs=self.archive/'blobs';blobs.mkdir()
+        orphan=blobs/('a'*64+'.bin');orphan.write_bytes(b'orphan')
+        self.start_server()
+        page=self.request('/__cleanup__')[2].decode()
+        self.assertIn('Предварителен отчет',page);self.assertTrue(orphan.exists())
+        self.assertIn('Почистване на архива',self.request('/')[2].decode())
+        self.assertEqual(self.request('/__cleanup__',headers={'Host':'192.168.1.20'})[0],403)
+        headers={'Content-Type':'application/x-www-form-urlencoded'}
+        self.assertEqual(self.request('/__cleanup__',b'action=clean',headers)[0],403)
+        result=archive_cleanup.report(self.archive,self.state)
+        from urllib.parse import urlencode
+        body=urlencode({'action':'clean','review':result['fingerprint'],'token':operations.tasks.token}).encode()
+        with patch.object(operations,'capture_port_busy',return_value=True):self.assertEqual(self.request('/__cleanup__',body,headers)[0],400)
+        with patch.object(operations,'capture_port_busy',return_value=False):self.assertEqual(self.request('/__cleanup__',body,headers)[0],200)
+        self.assertFalse(orphan.exists())
+        (self.state/'url_map.json').write_text('{bad')
+        with self.assertRaises(ValueError):archive_cleanup.report(self.archive,self.state)
+        blocked=self.request('/__cleanup__')[2].decode()
+        self.assertIn('Почистването е блокирано',blocked);self.assertIn('Възстанови',blocked)
+        self.assertNotIn('Потвърди преместването',blocked)
+
     def test_operations_owned_process_lifecycle_and_log(self):
         import operations,time
         tasks=operations.Tasks()

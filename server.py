@@ -414,7 +414,7 @@ class H(BaseHTTPRequestHandler):
     def route(self):
         p=urlparse(self.path)
         readonly=not self.control_local()
-        if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
+        if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__','/__cleanup__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
             return self.sendb(b'Local administration only','text/plain; charset=utf-8',403)
         if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/izzi-logo.svg'):
             filename=p.path.rsplit('/',1)[1]
@@ -435,6 +435,7 @@ class H(BaseHTTPRequestHandler):
         if p.path=='/__help__':
             content='<h1>Как да използвам библиотеката</h1><h2>1. Запиши съдържание</h2><p>На компютъра с архива стартирай capture_mode.bat. Настрой Firefox proxy към 127.0.0.1:8877 и отвори оригиналния учебник с нормален login. Включи Disable Cache. Използвай обновения bookmarklet за избрания срок или раздел.</p><h2>2. Провери и подреди</h2><p>Изпълни run_all_checks.bat. Отвори учебника в библиотеката и избери „Подреди / преименувай / скрий“ за локални настройки.</p><h2>3. Възстанови ресурси</h2><p>От „Липсващи ресурси“ използвай „Изтегли“ или „Изтегли всички“ при интернет и активен capture proxy. След края презареди списъка.</p><h2>Достъп от локалната мрежа</h2><p>От друго устройство отвори http://&lt;IPv4 на компютъра&gt;:8765/. Firewall трябва да допуска порт 8765 в Private мрежата. Няма login защита; използвай доверена мрежа.</p><h2>Обновяване</h2><p>Спри capture и сървъра, запази резервно копие на archive/state и пусни update_project.bat. Стартирай сървъра отново. При нов bookmarklet обнови и адреса на Firefox bookmark.</p>'
             return self.sendb(webui.page(content,'Помощ','help').encode(),'text/html; charset=utf-8')
+        if p.path=='/__cleanup__':return self.cleanup_page(p)
         try:
             m=load_archive_state(URL_MAP_FILE,{});books=load_archive_state(BOOKS_FILE,{})
             if not isinstance(m,dict) or not isinstance(books,dict):raise ValueError('invalid state root')
@@ -594,6 +595,7 @@ class H(BaseHTTPRequestHandler):
         print("[PROGRESS]",bid,self.command,urlparse(self.path).path)
         self.sendb(b'{"offline":true,"saved":true}',"application/json",200)
     def do_POST(self):
+        if urlparse(self.path).path=='/__cleanup__':return self.cleanup_action()
         if urlparse(self.path).path.startswith('/__delete_book__/'):return self.delete_book_action()
         if urlparse(self.path).path=='/__ops__/action':return self.control_action()
         if urlparse(self.path).path.startswith('/__catalog__/'):
@@ -625,6 +627,53 @@ class H(BaseHTTPRequestHandler):
             self.close_connection=True
             return self.sendb(json.dumps({'error':str(error)},ensure_ascii=False).encode(),'application/json',400)
         return self.sendb(b'{"ok":true}','application/json')
+
+    def cleanup_page(self,p):
+        import archive_cleanup
+        query=parse_qs(p.query);include=query.get('incomplete')==['1']
+        content='<h1>Почистване на архива</h1><p>Първо прегледай отчета. Файловете се преместват в state/cleanup_trash за възстановяване. Място на диска се освобождава след отделно окончателно изтриване.</p>'
+        token='<input type="hidden" name="token" value="'+html.escape(operations.tasks.token,quote=True)+'">'
+        try:
+            if query.get('purge'):
+                batch=query['purge'][0];result=archive_cleanup.trash_report(STATE_DIR,batch)
+                content+='<h2>Окончателно изтриване</h2><p>%d файла · %.1f MB. Това действие не може да се отмени.</p><form method="post">%s<input type="hidden" name="action" value="purge"><input type="hidden" name="batch" value="%s"><input type="hidden" name="review" value="%s"><button>Потвърди окончателното изтриване</button></form><p><a href="/__cleanup__">Отказ</a></p>'%(result['count'],result['bytes']/1048576,token,batch,result['fingerprint'])
+            else:
+                result=archive_cleanup.report(ARCHIVE_DIR,STATE_DIR,include)
+                if query.get('format')==['json']:return self.sendb(json.dumps(result,ensure_ascii=False,indent=2).encode(),'application/json',extra={'Content-Disposition':'attachment; filename="cleanup-report.json"'})
+                content+='<form class="cleanup-options" method="get"><label><input type="checkbox" name="incomplete" value="1" %s> Включи недовършените видео части (ще се загуби натрупаното изтегляне)</label><button>Генерирай отчет</button></form>'%('checked' if include else '')
+                content+='<h2>Предварителен отчет</h2><p>%d файла за преместване · %.1f MB. Запазени файлове и недовършени части: %d.</p><p><a href="?format=json%s">Изтегли пълния отчет</a></p>'%(len(result['files']),result['bytes']/1048576,len(result['preserved']),'&amp;incomplete=1' if include else '')
+                content+='<div class="table-wrap"><table><tr><th>Категория</th><th>Файл</th><th>Размер</th></tr>'+''.join('<tr><td>%s</td><td>%s/%s</td><td>%.1f KB</td></tr>'%(html.escape(e['category']),e['root'],html.escape(e['path']),e['size']/1024) for e in result['files'][:200])+'</table></div>'
+                if len(result['files'])>200:content+='<p>Показани са първите 200 файла; пълният списък е в отчета.</p>'
+                if result['files']:content+='<p>Спри capture и импорта на HAR преди почистване. Новите неизползвани файлове се запазват поне 5 минути.</p><form method="post">%s<input type="hidden" name="action" value="clean"><input type="hidden" name="review" value="%s"><input type="hidden" name="incomplete" value="%s"><button>Потвърди преместването</button></form>'%(token,result['fingerprint'],'1' if include else '0')
+        except (OSError,ValueError,TypeError,AttributeError,KeyError) as error:
+            content+='<p class="empty">Почистването е блокирано: '+html.escape(str(error))+'</p>'
+        if not query.get('purge'):
+            try:
+                for batch in archive_cleanup.batches(STATE_DIR):
+                    content+='<section><h2>Папка за възстановяване %s</h2><p>%d файла · %.1f MB</p><form method="post">%s<input type="hidden" name="action" value="restore"><input type="hidden" name="batch" value="%s"><button>Възстанови</button></form><p><a href="?purge=%s">Изтрий окончателно…</a></p></section>'%(batch['id'],batch['count'],batch['bytes']/1048576,token,batch['id'],batch['id'])
+            except (OSError,ValueError):content+='<p>Папките за възстановяване не могат да се прочетат.</p>'
+        return self.sendb(webui.page(content,'Почистване','cleanup').encode(),'text/html; charset=utf-8')
+
+    def cleanup_action(self):
+        if not self.control_local() or (self.headers.get('Origin') and self.headers['Origin']!='http://'+self.headers.get('Host','')):
+            self.close_connection=True;return self.sendb(b'Local administration only','text/plain',403)
+        try:
+            if self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type','').split(';')[0]!='application/x-www-form-urlencoded':raise ValueError('Invalid request')
+            length=int(self.headers.get('Content-Length','0'))
+            if not 0<length<=2048:raise ValueError('Invalid length')
+            self.connection.settimeout(10);raw=self.rfile.read(length)
+            if len(raw)!=length:raise ValueError('Incomplete request')
+            form=parse_qs(raw.decode('utf8'))
+            if form.get('token')!=[operations.tasks.token]:return self.sendb(b'Invalid confirmation','text/plain',403)
+            import archive_cleanup
+            action=form.get('action',[''])[0]
+            if action not in ('clean','restore','purge'):raise ValueError('Invalid action')
+            if action!='purge' and operations.capture_port_busy():raise ValueError('Спри capture преди почистване или възстановяване.')
+            if action=='clean':archive_cleanup.quarantine(ARCHIVE_DIR,STATE_DIR,form.get('review',[''])[0],form.get('incomplete')==['1'])
+            elif action=='restore':archive_cleanup.restore(ARCHIVE_DIR,STATE_DIR,form.get('batch',[''])[0])
+            else:archive_cleanup.purge(STATE_DIR,form.get('batch',[''])[0],form.get('review',[''])[0])
+        except (OSError,ValueError,TypeError,AttributeError,KeyError) as error:return self.sendb(str(error).encode(),'text/plain; charset=utf-8',400)
+        return self.sendb(b'','text/plain',303,extra={'Location':'/__cleanup__'})
 
     def delete_book_action(self):
         if not self.control_local() or (self.headers.get('Origin') and self.headers['Origin']!='http://'+self.headers.get('Host','')):
