@@ -38,14 +38,14 @@ async function navigation(){
  const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_navigation.js'),'utf8');
  assert.equal(source.split('/*IZZI_NAV_START*/')[1].split('/*IZZI_NAV_END*/')[0],helper.split(/\r?\n/).join(''));
  const row=(id,name,number,kind='unit')=>({id,name,prettyPosition:number,systemType:kind,isVisible:1});
- const modules=[row(10,'Раздел А','1','module'),row(20,'Раздел Б','2','module')];
+ const modules=[{...row(10,'Раздел А','1','module'),status:2,isVisible:0},row(20,'Раздел Б','2','module')];
  const roots={
   initial:{modules,entries:[]},
-  chapter:{modules,entries:[row(11,'Първи','1.1.'),row(12,'Секция','1.2.','section'),{...row(99,'Скрит','1.9.'),isVisible:0}]},
+  chapter:{modules,entries:[{...row(11,'Първи','1.1.'),status:2,isVisible:0},row(12,'Секция','1.2.','section'),{...row(99,'Скрит','1.9.'),isVisible:0}]},
   section:{modules:[],entries:[row(13,'Втори','1.2.1.'),row(11,'Повторение','1.1.')]}
  };
  const element=(item,attrs={})=>({getAttribute:name=>name===':item'?JSON.stringify(item):attrs[name]||null});
- const root=data=>({querySelectorAll:selector=>selector==='breadcrumbs'?[{getAttribute:()=>JSON.stringify([{...row(10,'Раздел А','1','module'),siblings:data.modules}])}]:selector.startsWith('units-list-item')?data.entries.map(item=>element(item)):[]});
+ const root=data=>({querySelector:()=>data.hasContent?{}:null,querySelectorAll:selector=>selector==='breadcrumbs'?[{getAttribute:()=>JSON.stringify([{...row(10,'Раздел А','1','module'),siblings:data.modules}])}]:selector.startsWith('units-list-item')?data.entries.map(item=>element(item)):[]});
  const doc={querySelector:()=>null,createElement:()=>({set innerHTML(value){this.content=root(roots[value]);}})};
  const paths=[];
  const collect=vm.runInNewContext(helper+';collectCaptureLessons',{URL,Map,Set});
@@ -56,6 +56,7 @@ async function navigation(){
  assert.equal(lessons[1].section,'Секция');
  const cancelled=await collect(doc,'https://bg.izzi.digital/DOS/1/0.html','1',fetchPage,async()=>null);
  assert.equal(cancelled.length,0);
+
 }
 async function linkedApps(){
  const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_links.js'),'utf8');

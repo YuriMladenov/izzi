@@ -3,8 +3,8 @@ async function collectCaptureLessons(doc,base,book,fetchPage,chooseModules){
 const sameBook=value=>{try{const url=new URL(value,base);return url.origin===new URL(base).origin&&new RegExp('^/DOS/'+book+'/\\d+\\.html$').test(url.pathname)?url:null;}catch{return null;}};
 const clean=value=>String(value||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const numbered=(number,name)=>number&&!name.startsWith(number+' ')?number+' '+name:name;
-const kind=row=>({module:'module',modul:'module',section:'section',sekcija:'section',unit:'unit',jedinica:'unit',lesson:'unit'}[row.systemType||row.tmplLabel||row.template]||'');
-const visible=row=>row.isVisible!==0&&row.isVisible!=='0'&&row.isVisible!==false&&!row.disabled;
+const kind=row=>[row.systemType,row.tmplLabel,row.template].map(value=>({module:'module',modul:'module',section:'section',sekcija:'section',unit:'unit',jedinica:'unit',lesson:'unit'}[value])).find(Boolean)||'';
+const visible=row=>!row.disabled&&(Number(row.status)===2||(row.isVisible!==0&&row.isVisible!=='0'&&row.isVisible!==false));
 const node=(row,attributes={})=>{if(!row||!visible(row)||!kind(row))return null;const url=sameBook(attributes.href||row.href||('/DOS/'+book+'/'+row.id+'.html'));if(!url)return null;const number=clean(attributes.number||row.prettyPosition||'');return {url,name:clean(attributes.name||row.name||row.title)||'Урок '+row.id,number,kind:kind(row),children:row.childrens||row.children||[]};};
 const parse=(root,page)=>{
 const modules=new Map(),entries=[],headings=[...root.querySelectorAll('.xblocks > .block-title h2,.mu-item h2,.xblocks .js-dropdown-heading')];

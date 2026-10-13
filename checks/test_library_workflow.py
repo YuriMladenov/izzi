@@ -382,6 +382,13 @@ class LibraryWorkflow(unittest.TestCase):
             self.assertIsNone(request('/api/account.json'))
             with patch.object(capture_addon,'UPDATE_UNTIL',0):self.assertIsNone(request('/DOS/1/app.js'))
 
+    def test_null_padded_html_is_not_reused(self):
+        from replay_resolver import usable_body
+        record=self.add('/DOS/1/2.html',b'<html>partial'+b'\x00'*100000)
+        self.assertFalse(usable_body(record,self.archive,'.html'))
+        record=self.add('/DOS/1/2.html',b'<html>complete</html>')
+        self.assertTrue(usable_body(record,self.archive,'.html'))
+
     def test_operations_owned_process_lifecycle_and_log(self):
         import operations,time
         tasks=operations.Tasks()

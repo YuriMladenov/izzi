@@ -32,6 +32,12 @@ def usable_body(r,archive,ext=''):
     if r.get('status',200) not in (200,206):return False
     if r.get('size') is not None and blob.stat().st_size!=r['size']:return False
     if r.get('status')==206 and not complete_body(r,blob.stat().st_size):return False
+    if ext in {'.html','.htm'}:
+        with blob.open('rb') as stream:
+            while True:
+                chunk=stream.read(65536)
+                if not chunk:break
+                if b'\x00' in chunk:return False
     if ext in {'.woff','.woff2','.ttf','.otf'}:
         with blob.open('rb') as stream:magic=stream.read(4)
         if magic not in (b'wOF2',b'wOFF',b'OTTO',b'\x00\x01\x00\x00',b'ttcf',b'true'):return False
