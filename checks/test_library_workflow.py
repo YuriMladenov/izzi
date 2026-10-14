@@ -57,6 +57,64 @@ class LibraryWorkflow(unittest.TestCase):
         try:response=self.opener.open(req,timeout=5)
         except urllib.error.HTTPError as error:response=error
         with response:return response.code,response.headers,response.read()
+
+    def test_prepared_static_cache_invalidates_modified_and_deleted_sources(self):
+        row=self.add('/DOS/1/profil/test.js',b'const value=1;',content_type='application/javascript')
+        self.start_server()
+        with patch.object(server,'rewrite',wraps=server.rewrite) as rewrite:
+            status,headers,data=self.request('/DOS/1/profil/test.js')
+            self.assertEqual(200,status);self.assertEqual(b'const value=1;',data)
+            self.assertEqual(304,self.request('/DOS/1/profil/test.js',headers={'If-None-Match':headers['ETag']})[0])
+            self.assertEqual(200,self.request('/DOS/1/profil/test.js')[0]);self.assertEqual(1,rewrite.call_count)
+            (self.archive/row['key']).write_bytes(b'const value=2;')
+            status,new_headers,data=self.request('/DOS/1/profil/test.js',headers={'If-None-Match':headers['ETag']})
+            self.assertEqual(200,status);self.assertEqual(b'const value=2;',data)
+            self.assertNotEqual(headers['ETag'],new_headers['ETag']);self.assertEqual(2,rewrite.call_count)
+            (self.archive/row['key']).unlink()
+            self.assertEqual(404,self.request('/DOS/1/profil/test.js')[0])
+
+    def test_parallel_cache_builds_share_same_file_without_blocking_other_files(self):
+        import replay_cache
+        one=self.archive/'one.js';two=self.archive/'two.js'
+        one.write_bytes(b'one');two.write_bytes(b'two')
+        entered=threading.Event();release=threading.Event();calls=[]
+        def build():
+            calls.append(1);entered.set()
+            if not release.wait(3):raise TimeoutError('cache build not released')
+            return one.read_bytes()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            futures=[pool.submit(replay_cache.prepared,one,(),build) for _ in range(6)]
+            try:
+                self.assertTrue(entered.wait(3))
+                self.assertEqual(b'two',replay_cache.prepared(two,(),two.read_bytes)[0])
+            finally:release.set()
+            for future in futures:self.assertEqual(b'one',future.result(timeout=3)[0])
+        self.assertEqual(1,len(calls))
+        one.write_bytes(b'bad')
+        def broken():raise UnicodeDecodeError('utf8',b'\xff',0,1,'invalid source')
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures=[pool.submit(replay_cache.prepared,one,(),broken) for _ in range(4)]
+            for future in futures:
+                with self.assertRaises(UnicodeDecodeError):future.result(timeout=3)
+        self.assertFalse(replay_cache.BUILDING,'failed builds must release waiting requests')
+
+    def test_keepalive_response_framing_for_range_error_head_and_revalidation(self):
+        self.add('/test.mp4',b'\x00\x00\x00\x18ftypmp42'+b'video'*20,content_type='video/mp4')
+        self.start_server()
+        connection=http.client.HTTPConnection('127.0.0.1',self.httpd.server_port,timeout=3)
+        try:
+            socket=None
+            for method,headers,status in [('GET',{},200),('HEAD',{},200),('GET',{'Range':'bytes=9999-'},416),('GET',{'Range':'bytes=2-5'},206)]:
+                connection.request(method,'/test.mp4',headers=headers)
+                response=connection.getresponse();self.assertEqual(status,response.status);response.read()
+                if socket is None:socket=connection.sock
+                self.assertIs(socket,connection.sock)
+                etag=response.getheader('ETag') or etag
+            connection.request('GET','/test.mp4',headers={'If-None-Match':etag})
+            response=connection.getresponse();self.assertEqual(304,response.status);self.assertEqual(b'',response.read())
+            connection.request('GET','/missing.png');response=connection.getresponse()
+            self.assertEqual(404,response.status);response.read();self.assertIs(socket,connection.sock)
+        finally:connection.close()
     def test_bundled_katex_fallback_cache_and_archive_precedence(self):
         from urllib.parse import quote
         path='/DOS/888827/components/fonts/KaTeX_Main-Regular.woff'

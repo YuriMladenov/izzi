@@ -27,11 +27,15 @@ def signature(path):
 
 def load(path,default):
     path=Path(path).resolve()
-    with LOCK:
-        if archive_db.active(path):
-            stamp=('sqlite',signature(archive_db.database(path)),archive_db.revision(archive_db.database(path)))
+    if archive_db.active(path):
+        # SQLite may wait for I/O; do not block all other HTTP worker threads.
+        stamp=('sqlite',signature(archive_db.database(path)),archive_db.revision(archive_db.database(path)))
+        with LOCK:
             if path in CACHE and CACHE[path][0]==stamp:return CACHE[path][1]
-            value=archive_db.Index(path);CACHE[path]=(stamp,value);return value
+        value=archive_db.Index(path)
+        with LOCK:CACHE[path]=(stamp,value)
+        return value
+    with LOCK:
         try:stamp=signature(path)
         except FileNotFoundError:CACHE.pop(path,None);return default
         if path in CACHE and CACHE[path][0]==stamp:return CACHE[path][1]

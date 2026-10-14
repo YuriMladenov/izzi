@@ -1,5 +1,5 @@
 """SQLite resource/book indexes; legacy JSON is imported once and kept as backup."""
-import json, re, sqlite3
+import json, re, sqlite3,threading
 from collections.abc import MutableMapping
 from contextlib import closing,contextmanager
 from pathlib import Path
@@ -8,6 +8,31 @@ from replay_resolver import _canon_path
 
 NAMES={'url_map.json':'resources','books.json':'books'}
 DB_NAME='library.sqlite3'
+READERS=threading.local()
+
+@contextmanager
+def read_session():
+    """Reuse read handles within one HTTP request, close them deterministically."""
+    if getattr(READERS,'connections',None) is not None:
+        yield;return
+    READERS.connections={}
+    try:yield
+    finally:
+        connections=READERS.connections;READERS.connections=None
+        for connection in connections.values():connection.close()
+
+@contextmanager
+def read_connection(db):
+    connections=getattr(READERS,'connections',None)
+    if connections is None:
+        with connect(db) as connection:yield connection
+        return
+    key=Path(db).resolve()
+    try:
+        if key not in connections:
+            connections[key]=sqlite3.connect(key.as_uri()+'?mode=ro',uri=True,timeout=30)
+        yield connections[key]
+    except sqlite3.Error as error:raise ValueError('SQLite index unavailable: '+str(error)) from error
 
 def database(path):return Path(path).parent/DB_NAME
 
@@ -70,7 +95,7 @@ def initialize(state):
     return db
 
 def revision(db):
-    with connect(db) as c:
+    with read_connection(db) as c:
         if c.execute("SELECT value FROM metadata WHERE key='schema'").fetchone()!=(1,):raise ValueError('Incomplete SQLite migration')
         return c.execute("SELECT value FROM metadata WHERE key='revision'").fetchone()[0]
 
@@ -82,7 +107,7 @@ class Index(MutableMapping):
     def __getitem__(self,key):
         if key in self.deleted:raise KeyError(key)
         if key not in self.loaded:
-            with connect(self.db) as c:row=c.execute(f'SELECT data FROM {self.table} WHERE {self.key}=?',(key,)).fetchone()
+            with read_connection(self.db) as c:row=c.execute(f'SELECT data FROM {self.table} WHERE {self.key}=?',(key,)).fetchone()
             self.original[key]=row[0] if row else None
             if row is None:raise KeyError(key)
             self.loaded[key]=json.loads(row[0])
@@ -94,15 +119,15 @@ class Index(MutableMapping):
         self.deleted.discard(key);self.loaded[key]=value
     def __delitem__(self,key):self[key];self.loaded.pop(key,None);self.deleted.add(key)
     def __iter__(self):
-        with connect(self.db) as c:keys=[row[0] for row in c.execute(f'SELECT {self.key} FROM {self.table} ORDER BY rowid')]
+        with read_connection(self.db) as c:keys=[row[0] for row in c.execute(f'SELECT {self.key} FROM {self.table} ORDER BY rowid')]
         known=set(keys)
         return iter([key for key in keys if key not in self.deleted]+[key for key in self.loaded if key not in known and key not in self.deleted])
     def __len__(self):
-        with connect(self.db) as c:count=c.execute(f'SELECT count(*) FROM {self.table}').fetchone()[0]
+        with read_connection(self.db) as c:count=c.execute(f'SELECT count(*) FROM {self.table}').fetchone()[0]
         return count-sum(self.original.get(key) is not None for key in self.deleted)+sum(self.original.get(key) is None for key in self.loaded)
     def items(self):
         # Stream scans without retaining every decoded resource in RAM.
-        with connect(self.db) as c:
+        with read_connection(self.db) as c:
             for key,raw in c.execute(f'SELECT {self.key},data FROM {self.table} ORDER BY rowid'):
                 if key not in self.deleted:yield key,self.loaded.get(key) if key in self.loaded else json.loads(raw)
         for key,value in self.loaded.items():
@@ -110,7 +135,7 @@ class Index(MutableMapping):
     def values(self):return (value for _,value in self.items())
     def candidates(self,column,value):
         if self.table!='resources':return ()
-        with connect(self.db) as c:rows=c.execute(f'SELECT url,data FROM resources WHERE {column}=?',(value,)).fetchall()
+        with read_connection(self.db) as c:rows=c.execute(f'SELECT url,data FROM resources WHERE {column}=?',(value,)).fetchall()
         return [(url,urlparse(url),json.loads(raw)) for url,raw in rows]
     def replay_candidates(self,path):return self.candidates('canonical',path)
     def lesson_candidates(self,path):return self.candidates('lesson',path)

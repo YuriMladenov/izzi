@@ -36,6 +36,9 @@ def allowed(host):
     return h=="izzi.digital" or h.endswith(".izzi.digital") or h in external_links.hosts() or h=="cdnjs.cloudflare.com"
 
 def request(flow:http.HTTPFlow):
+    with archive_db.read_session():_request(flow)
+
+def _request(flow):
     global MISSING_ONLY,UPDATE_BOOK,UPDATE_UNTIL
     p=urlparse(flow.request.pretty_url)
     if flow.request.headers.pop('X-IZZI-Resume',None):
@@ -164,7 +167,11 @@ def request(flow:http.HTTPFlow):
         if recovering: print("[RECOVERY REQUEST]",canonical_url(flow.request.pretty_url))
 
 def response(flow:http.HTTPFlow):
-    capture_completion.finish(getattr(flow,'id',id(flow)))
+    try:
+        with archive_db.read_session():_response(flow)
+    finally:capture_completion.finish(getattr(flow,'id',id(flow)))
+
+def _response(flow):
     if flow.response is None or flow.response.headers.get("X-IZZI-Archive")=="1":return
     control=urlparse(flow.request.pretty_url)
     if control.hostname==SOURCE_HOST and control.path.startswith("/__offline_capture__/"):return
@@ -250,3 +257,7 @@ def response(flow:http.HTTPFlow):
 
 def error(flow:http.HTTPFlow):
     capture_completion.finish(getattr(flow,'id',id(flow)))
+
+def done():
+    from capture_observed import flush
+    flush()

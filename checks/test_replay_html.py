@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 import unittest
 import re
+import json
 import shutil
 import subprocess
 
@@ -44,6 +45,35 @@ class ReplayHTML(unittest.TestCase):
     def test_nonlesson_unchanged(self):
         html='<video src="#"></video>'
         self.assertEqual(html,self.render(html,path='/index.html'))
+
+    def test_export_reader_uses_local_content_without_archived_profile(self):
+        data={'isExport':True,'bookshelfBase':'/','id':42917,'title':'</script>','isVisible':1}
+        html='<head></head><script>var dosData = '+json.dumps(data)+';</script><main>Lesson</main>'
+        rendered=self.render(html)
+        match=re.search(r'var dosData\s*=\s*(.*?);</script>',rendered)
+        parsed=json.loads(match[1])
+        self.assertEqual({**data,'isExport':False},parsed)
+        self.assertIn(r'\u003c/script>',match[1])
+        self.assertIn("window.baseUrl='/'",rendered)
+        self.assertIn('<main>Lesson</main>',rendered)
+        self.assertIn('izzi-offline-user-name',rendered)
+
+    def test_youtube_templates_in_javascript_remain_valid(self):
+        template="'<youtube-player video-id=\"abcdefghijk\" title=\"Тест\"></youtube-player>'"
+        script='const template='+template+';'
+        self.assertEqual(script,server.rewrite(script.encode(),html_document=False).decode())
+        inline='<script>'+script+'</script>'
+        self.assertIn(inline,server.rewrite(('<head></head>'+inline).encode(),html_document=True).decode())
+        bound='<youtube-player :video-id="fields.youtube.videoId" :video-url="fields.youtube.videoUrl"></youtube-player>'
+        self.assertEqual(bound,server.rewrite(bound.encode(),html_document=True).decode())
+        literal='<youtube-player video-url="https://www.youtube.com/watch?v=abcdefghijk"></youtube-player>'
+        self.assertIn('data-youtube-id="abcdefghijk"',server.rewrite(literal.encode(),html_document=True).decode())
+
+    @unittest.skipUnless(shutil.which('node'),'Node.js required for dynamic YouTube player runtime test')
+    def test_dynamic_youtube_player(self):
+        result=subprocess.run(['node',str(Path(__file__).with_name('test_offline_youtube.js'))],
+                              text=True,capture_output=True,timeout=10,encoding='utf-8')
+        self.assertEqual(0,result.returncode,result.stdout+result.stderr)
 
     def test_corrects_mp4_source_type(self):
         t=self.render('<video><source type="text/html" src="/movie.mp4?v=1"></video>')

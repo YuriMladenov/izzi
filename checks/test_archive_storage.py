@@ -25,6 +25,28 @@ class Storage(unittest.TestCase):
         self.write('url_map.json',{self.url:[self.rec]})
         self.write('books.json',{'1':{'title':'Book for 5. class','lessons':{'2':{'title':'Lesson','path':'/DOS/1/2.html'}}},'3':{'title':'Other','lessons':{}}})
         archive_db.initialize(self.state)
+
+    def test_request_reads_reuse_connection_and_close_even_after_failure(self):
+        self.prepare()
+        real_connect=sqlite3.connect
+        for fail in (False,True):
+            connections=[]
+            def tracked(*args,**kwargs):
+                connection=real_connect(*args,**kwargs);connections.append(connection);return connection
+            with patch.object(archive_db.sqlite3,'connect',side_effect=tracked):
+                try:
+                    with archive_db.read_session():
+                        mapping=archive_state.load(self.state/'url_map.json',{})
+                        self.assertEqual(self.rec,find(mapping,'bg.izzi.digital','/DOS/1/2.html',''))
+                        with archive_db.read_session():
+                            self.assertIn('1',archive_state.load(self.state/'books.json',{}))
+                        self.assertEqual(1,len(connections))
+                        if fail:raise OSError('request interrupted')
+                except OSError:
+                    if not fail:raise
+            self.assertEqual(1,len(connections))
+            for connection in connections:
+                with self.assertRaises(sqlite3.ProgrammingError):connection.execute('SELECT 1')
     def test_backup_closes_connections_on_success_and_failure(self):
         self.prepare()
         real_connect=sqlite3.connect

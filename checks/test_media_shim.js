@@ -20,7 +20,7 @@ const nodes = [audio, mapped, valid, unknown];
 const listeners = {};
 let observer;
 const document = {baseURI: 'http://127.0.0.1:8765/DOS/1408736/1408788.html',
-  readyState: 'loading', documentElement: {}, querySelectorAll() {return nodes;},
+  readyState: 'loading', documentElement: {}, querySelectorAll(selector) {return selector==='video,audio'?nodes:[];},
   addEventListener(name, fn) {listeners[name] = fn;}};
 vm.runInNewContext(shim, {document, window: {}, URL, console: {log() {}}, setTimeout() {},
   MutationObserver: class {constructor(fn) {observer = fn;} observe() {}}});

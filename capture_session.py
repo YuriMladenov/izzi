@@ -12,6 +12,8 @@ def save(x):
     P.write_text(json.dumps(x,ensure_ascii=False,indent=2),encoding="utf-8")
 
 def event(kind,book=None,lesson=None,url=None,extra=None):
+    from capture_observed import flush
+    flush(force=kind in ('lesson-done','lesson-incomplete','book-done','book-incomplete'))
     x=load()
     x.setdefault("visits",[]).append({
         "time":time.strftime("%Y-%m-%d %H:%M:%S"),"kind":kind,

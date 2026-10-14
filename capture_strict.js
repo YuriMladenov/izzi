@@ -1,4 +1,16 @@
 /* Strict completion, targeted recovery and visible resource markers. Embedded in the bookmarklet. */
+async function captureLoadLesson(frame,lesson){
+let previous;try{previous=frame.contentDocument;}catch{}
+let loaded=false;frame.onload=()=>{loaded=true;};frame.src=lesson.href;
+for(let attempt=0;attempt<100;attempt++){
+try{
+const doc=frame.contentDocument,win=frame.contentWindow,app=doc?.querySelector?.('.app-main');
+if(win?.location.pathname===lesson.pathname&&doc?.readyState!=='loading'&&doc?.body&&(!app||app.classList?.contains('app-main--ready'))&&(loaded||doc!==previous))return;
+}catch{}
+await new Promise(resolve=>setTimeout(resolve,250));
+}
+/* Strict checks report a page failure instead of marking an unmounted lesson done. */
+}
 function captureResourceKey(value,base){
 try{const u=new URL(String(value).replace(/\\+/g,'/'),base);u.hash='';u.searchParams.delete('__izzi_offline_recover');
 const id=/^(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)$/.test(u.hostname)?(u.searchParams.get('v')||u.pathname.match(/\/(?:embed|shorts|live)\/([\w-]{11})/)?.[1]||(u.hostname.endsWith('youtu.be')?u.pathname.slice(1):'')):'';
@@ -91,12 +103,18 @@ else if(issue.kind==='image'&&node.style.backgroundImage)node.style.backgroundIm
 await ping('resource-recovered',lesson,{asset:issue.url});
 }finally{clearTimeout(timer);}
 }
-async function captureStrictChecks(frame,lesson,ping,skipAvailable=false){
+async function captureStrictChecks(frame,lesson,ping,skipAvailable=typeof missingOnly!=='undefined'&&missingOnly){
 const issues=[];
-for(const [kind,check] of [['image',captureLessonImages],['file',captureLessonFiles],['media',captureLessonMedia],['link',captureLessonLinks]]){
-try{const result=await check(frame,lesson,ping,{skipAvailable});issues.push(...(result.issues||[]));}
-catch(error){issues.push({kind:'page',url:lesson.href,reason:error.message});}
+try{
+const doc=frame.contentDocument,app=doc?.querySelector?.('.app-main');
+if(!doc||frame.contentWindow?.location?.pathname!==lesson.pathname||(doc.readyState==='loading')||(app&&!app.classList?.contains('app-main--ready')))return [{kind:'page',url:lesson.href,reason:'Приложението на урока не завърши зареждането. Провери грешките и достъпа в оригиналния сайт.'}];
+}catch(error){return [{kind:'page',url:lesson.href,reason:error.message}];}
+const checks=await Promise.allSettled([captureLessonImages(frame,lesson,ping,{skipAvailable}),captureLessonFiles(frame,lesson,ping,{skipAvailable}),captureLessonMedia(frame,lesson,ping,{skipAvailable})]);
+for(const result of checks){
+if(result.status==='fulfilled')issues.push(...(result.value.issues||[]));
+else issues.push({kind:'page',url:lesson.href,reason:result.reason.message});
 }
+try{const result=await captureLessonLinks(frame,lesson,ping,{skipAvailable});issues.push(...(result.issues||[]));}catch(error){issues.push({kind:'page',url:lesson.href,reason:error.message});}
 try{
 const missing=await captureArchiveBarrier(frame,lesson);
 for(const issue of missing){const existing=issues.find(row=>captureResourceKey(row.url,lesson.href)===captureResourceKey(issue.url,lesson.href));if(!existing)issues.push(issue);else if(issue.reason.startsWith('HTTP ')&&!existing.reason.includes('HTTP '))existing.reason+=' · '+issue.reason;}

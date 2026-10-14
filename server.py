@@ -12,6 +12,8 @@ import library_catalog
 import webui
 import book_covers
 import operations
+import archive_db
+import replay_cache
 from archive_state import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
@@ -65,9 +67,10 @@ def bundled_font(host,path):
         return font if font.is_file() else None
     return None
 
-def rewrite(b,host=None):
+def rewrite(b,host=None,html_document=None):
     # Called ONLY for already-decoded textual resources.
     t=b.decode("utf-8",errors="strict")
+    if html_document is None:html_document=t.lstrip().startswith('<')
     pairs=(("https://bg.izzi.digital/","/"),("http://bg.izzi.digital/","/"),
            ("//bg.izzi.digital/","/"),
            ("https:\\/\\/bg.izzi.digital\\/","\\/"),
@@ -83,35 +86,45 @@ def rewrite(b,host=None):
            ("https:\\/\\/xapi.izzi.digital\\/","\\/__host__\\/xapi.izzi.digital\\/"),
            ("https://www.googletagmanager.com/gtm.js","/__offline__/gtag.js"))
     for a,c in pairs:t=t.replace(a,c)
-    # External YouTube playback is unavailable offline. Keep its API loader
-    # local without simulating player events or fetching third-party cookies.
-    t=re.sub(r'(?:(?:https?:)?//|https?:\\/\\/)(?:www\.)?youtube\.com(?:/|\\/)iframe_api\b',
-             '/__offline__/youtube-api.js',t,flags=re.I)
-    t=re.sub(r'(?:https?:)?//(?:www\.)?youtube\.com/s/player/[^"\'\s<>]+/www-widgetapi[^"\'\s<>]*\.js',
-             '/__offline__/youtube-api.js',t,flags=re.I)
-    t=re.sub(r'(?:https?:)?//(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)/embed/',
-             '/__offline__/external-media/',t,flags=re.I)
-    slash=r'(?:/|\\/)'
-    t=re.sub(r'https?:'+slash+slash+r'(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com)'+slash+r'(?:embed'+slash+r'|shorts'+slash+r'|watch\?v=)([A-Za-z0-9_-]{11})',lambda m:'/__offline__/external-media/'+m[1],t)
-    t=re.sub(r'https?:'+slash+slash+r'(?:www\.)?youtu\.be'+slash+r'([A-Za-z0-9_-]{11})',lambda m:'/__offline__/external-media/'+m[1],t)
-    def youtube_component(match):
-        class Attributes(HTMLParser):
-            values={}
-            def handle_starttag(self,tag,attrs):self.values=dict(attrs)
-        parser=Attributes();parser.feed('<youtube-player '+match[1]+'>')
-        identifier=parser.values.get('video-id','')
-        if not re.fullmatch(r'[A-Za-z0-9_-]{11}',identifier):return '<p>Невалиден YouTube видео адрес.</p>'
-        title=html.escape(parser.values.get('title',''))
-        description=html.escape(re.sub(r'<[^>]*>',' ',html.unescape(parser.values.get('description',''))))
-        return '<section class="offline-youtube" data-youtube-id="'+identifier+'">'+('<h3>'+title+'</h3>' if title else '')+('<p>'+description+'</p>' if description.strip() else '')+'<iframe title="'+(title or 'Видео')+'" src="/__offline__/external-media/'+identifier+'" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen loading="lazy"></iframe></section>'
-    t=re.sub(r'<youtube-player\b([^>]*?)>[\s\S]*?</youtube-player\s*>',youtube_component,t,flags=re.I)
-    import youtube_download
-    def youtube_link(match):
-        identifier=youtube_download.video_id(match[0])
-        return '/__offline__/external-media/'+identifier if identifier else match[0]
-    t=re.sub(r'(?:https?:)?//(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)/[^\s"\'<>\\]+',youtube_link,t)
+    if 'youtu' in t.lower():
+        # External YouTube playback is unavailable offline. Keep its API loader
+        # local without simulating player events or fetching third-party cookies.
+        origin=r'(?:https?://|//|https?:\\/\\/)'
+        t=re.sub(origin+r'(?:www\.)?youtube\.com(?:/|\\/)iframe_api\b',
+                 '/__offline__/youtube-api.js',t,flags=re.I)
+        t=re.sub(r'(?:https?://|//)(?:www\.)?youtube\.com/s/player/[^"\'\s<>]+/www-widgetapi[^"\'\s<>]*\.js',
+                 '/__offline__/youtube-api.js',t,flags=re.I)
+        t=re.sub(r'(?:https?://|//)(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)/embed/',
+                 '/__offline__/external-media/',t,flags=re.I)
+        slash=r'(?:/|\\/)'
+        t=re.sub(r'https?:'+slash+slash+r'(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com)'+slash+r'(?:embed'+slash+r'|shorts'+slash+r'|watch\?v=)([A-Za-z0-9_-]{11})',lambda m:'/__offline__/external-media/'+m[1],t)
+        t=re.sub(r'https?:'+slash+slash+r'(?:www\.)?youtu\.be'+slash+r'([A-Za-z0-9_-]{11})',lambda m:'/__offline__/external-media/'+m[1],t)
+        def youtube_component(match):
+            class Attributes(HTMLParser):
+                values={}
+                def handle_starttag(self,tag,attrs):self.values=dict(attrs)
+            parser=Attributes();parser.feed('<youtube-player '+match[1]+'>')
+            if any(name in parser.values for name in (':video-id','v-bind:video-id',':video-url','v-bind:video-url')):
+                return match[0] # Vue resolves these props; the runtime shim supplies the local player.
+            identifier=parser.values.get('video-id','')
+            if not identifier:
+                local=re.search(r'/__offline__/external-media/([A-Za-z0-9_-]{11})(?:[?&#/]|$)',parser.values.get('video-url',''))
+                if local:identifier=local[1]
+            if not re.fullmatch(r'[A-Za-z0-9_-]{11}',identifier):return '<p>Невалиден YouTube видео адрес.</p>'
+            title=html.escape(parser.values.get('title',''))
+            description=html.escape(re.sub(r'<[^>]*>',' ',html.unescape(parser.values.get('description',''))))
+            return '<section class="offline-youtube" data-youtube-id="'+identifier+'">'+('<h3>'+title+'</h3>' if title else '')+('<p>'+description+'</p>' if description.strip() else '')+'<iframe title="'+(title or 'Видео')+'" src="/__offline__/external-media/'+identifier+'" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen loading="lazy"></iframe></section>'
+        if html_document and '<youtube-player' in t:
+            scripts=[(m.start(),m.end()) for m in re.finditer(r'<script\b[^>]*>[\s\S]*?</script\s*>',t,re.I)]
+            t=re.sub(r'<youtube-player\b([^>]*?)>[\s\S]*?</youtube-player\s*>',lambda m:m[0] if any(a<=m.start()<b for a,b in scripts) else youtube_component(m),t,flags=re.I)
+        import youtube_download
+        def youtube_link(match):
+            identifier=youtube_download.video_id(match[0])
+            return '/__offline__/external-media/'+identifier if identifier else match[0]
+        t=re.sub(r'(?:https?://|//)(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)/[^\s"\'<>\\]+',youtube_link,t)
     import external_links
     for external in external_links.hosts()|{'cdnjs.cloudflare.com'}:
+        if external not in t:continue
         prefix='/__host__/'+external+'/'
         for origin in ('https://'+external+'/', 'http://'+external+'/', '//'+external+'/'):
             t=t.replace(origin,prefix).replace(origin.replace('/','\\/'),prefix.replace('/','\\/'))
@@ -167,6 +180,16 @@ def inject_media_map(b,path):
     if not m:return b
     bid,lid=m.groups(); media=lesson_media(bid,lid)
     t=b.decode("utf-8",errors="strict")
+    # Use the captured lesson's built-in reader without an online profile check.
+    marker=re.search(r'\bvar\s+dosData\s*=\s*',t)
+    if marker:
+        try:
+            data,length=json.JSONDecoder().raw_decode(t[marker.end():])
+            if isinstance(data,dict) and data.get('isExport') is True:
+                data['isExport']=False
+                safe=json.dumps(data,ensure_ascii=False).replace('<','\\u003c')
+                t=t[:marker.end()]+safe+t[marker.end()+length:]
+        except ValueError:pass
     t=MediaPlaceholders(t).clean()
     # IZZI pages may contain fallback <source> tags whose declared type does not
     # match the .mp4 URL. Firefox rejects those before trying the resource.
@@ -184,6 +207,7 @@ def inject_media_map(b,path):
                        "blocks":[x.get("blocks",[]) for x in media]},ensure_ascii=False).replace("<","\\u003c")
     shim=r"""<script>
 window.__IZZI_OFFLINE_MEDIA__=PAYLOAD;
+if(typeof window.baseUrl==='undefined')window.baseUrl='/';
 (function(){
   const M=window.__IZZI_OFFLINE_MEDIA__.media||[];
   const B=window.__IZZI_OFFLINE_MEDIA__.blocks||[];
@@ -193,6 +217,7 @@ window.__IZZI_OFFLINE_MEDIA__=PAYLOAD;
   }
   function fix(root){
     if(document.readyState==="loading")return;
+    fixYoutube();
     const nodes=(root||document).querySelectorAll("video,audio");
     nodes.forEach((el,i)=>{
       let src=el.getAttribute("src")||"";
@@ -226,6 +251,8 @@ window.__IZZI_OFFLINE_MEDIA__=PAYLOAD;
   new MutationObserver(()=>fix(document)).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:["src"]});
 })();
 </script>""".replace("PAYLOAD",payload)
+    youtube_shim=Path(__file__).with_name('offline_youtube.js').read_text(encoding='utf-8')
+    shim=shim.replace('  function fix(root){',youtube_shim+'\n  function fix(root){')
     # Observe parsing from the head, before media elements can try placeholder URLs.
     head=re.search(r'<head\b[^>]*>',t,re.I)
     pos=head.end() if head else 0
@@ -297,6 +324,8 @@ def progress_summary(book_id):
 def missing_log():return STATE_DIR/"missing_resources.jsonl"
 
 class H(BaseHTTPRequestHandler):
+    protocol_version='HTTP/1.1'
+    timeout=15
     def cache_match(self,etag):
         candidates=self.headers.get('If-None-Match','').split(',')
         matches=any(value.strip()=='*' or value.strip().removeprefix('W/')==etag for value in candidates)
@@ -307,8 +336,8 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         return True
 
-    def send_cached(self,data,ctype,extra=None):
-        etag='"'+hashlib.sha256(data).hexdigest()+'"'
+    def send_cached(self,data,ctype,extra=None,etag=None):
+        etag=etag or '"'+hashlib.sha256(data).hexdigest()+'"'
         if self.cache_match(etag):return
         self.send_response(200)
         self.send_header('Content-Type',ctype)
@@ -334,7 +363,7 @@ class H(BaseHTTPRequestHandler):
         if requested and self.headers.get('If-Range') and self.headers['If-Range']!=etag:requested=None
         rr=parse_range(requested,total)
         if rr=="invalid":
-            self.send_response(416);self.send_header("Content-Range",f"bytes */{total}");self.end_headers();return
+            return self.sendb(b'',ct,416,{'Content-Range':f'bytes */{total}'})
         if rr:
             a,b=rr;n=b-a+1
             self.send_response(206);self.send_header("Content-Type",ct);self.send_header("Accept-Ranges","bytes")
@@ -423,18 +452,25 @@ class H(BaseHTTPRequestHandler):
                   "range="+str(self.headers.get("Range")),r["key"],path)
             return self.sendfile(f,ct)
         if (ext in FONT_EXT or mime.startswith(('image/','font/'))) and mime!='image/svg+xml':return self.sendfile(f,ct)
+        static=not path.startswith('/api/') and (ext in {'.js','.css','.svg'} or mime=='image/svg+xml' or (ext=='.json' and '/datastore/blocks/' in path))
+        if static:
+            import external_links
+            try:
+                data,etag=replay_cache.prepared(f,(host,external_links.hosts()),lambda:rewrite(f.read_bytes(),host,html_document=False))
+                return self.send_cached(data,ct,etag=etag)
+            except UnicodeDecodeError:
+                return self.sendb(b'Captured static resource is compressed/corrupt. Recapture it.','text/plain; charset=utf-8',502)
         b=f.read_bytes()
         if ext in DOC_EXT or '/files/' in path:
             sender=self.sendb if path.startswith('/api/') else self.send_cached
             return sender(b,ct,extra={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(Path(unquote(path)).name,safe='')})
         if mime.startswith("text/") or mime in TEXT or "javascript" in mime:
             try:
-                b=rewrite(b,host)
+                b=rewrite(b,host,html_document=mime.startswith('text/html'))
                 if path.lower().endswith(".html"): b=inject_media_map(b,path)
             except UnicodeDecodeError:
                 print("[BAD TEXT BLOB]",r["key"],path)
                 return self.sendb(b"Captured text resource is still compressed/corrupt. Recapture with v3.2 and Disable Cache.","text/plain; charset=utf-8",502)
-        if not path.startswith('/api/') and (ext in {'.js','.css','.svg'} or mime=='image/svg+xml' or (ext=='.json' and '/datastore/blocks/' in path)):return self.send_cached(b,ct)
         return self.sendb(b,ct)
 
     def route(self):
@@ -562,7 +598,12 @@ class H(BaseHTTPRequestHandler):
             import youtube_download
             identifier=p.path.rsplit('/',1)[-1]
             if youtube_download.local_file(identifier):
-                return self.sendb(('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#000}video{width:100%;height:100vh}</style><video controls playsinline src="/__offline__/youtube-video/'+identifier+'"></video>').encode(),'text/html; charset=utf-8')
+                times=[]
+                for key in ('start','end'):
+                    value=parse_qs(p.query).get(key,[''])[0]
+                    times.append(value if re.fullmatch(r'\d+(?:\.\d+)?',value) else '')
+                fragment=('#t='+times[0]+(','+times[1] if times[1] else '')) if any(times) else ''
+                return self.sendb(('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#000}video{width:100%;height:100vh}</style><video controls playsinline preload="metadata" src="/__offline__/youtube-video/'+identifier+fragment+'"></video>').encode(),'text/html; charset=utf-8')
             return self.sendb('<!doctype html><meta charset="utf-8"><p>Външното видео не е включено в офлайн архива.</p>'.encode(),"text/html; charset=utf-8")
         if p.path=="/__missing__":
             events=[];seen=set();f=missing_log()
@@ -600,8 +641,10 @@ class H(BaseHTTPRequestHandler):
             host,tail=rest.split("/",1);return self.archive(m,unquote(host),"/"+tail,p.query)
         return self.archive(m,SOURCE_HOST,p.path,p.query)
 
-    def do_GET(self):self.route()
-    def do_HEAD(self):self.route()
+    def do_GET(self):
+        with archive_db.read_session():self.route()
+    def do_HEAD(self):
+        with archive_db.read_session():self.route()
     def progress(self):
         if self.headers.get("Transfer-Encoding"):
             self.close_connection=True

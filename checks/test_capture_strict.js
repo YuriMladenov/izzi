@@ -49,4 +49,30 @@ task=api.showCapturePause(frame,lesson,[issue],async()=>{});panel=doc.body.child
 }
 console.log('PASS: strict helper embedding, URL aliases, visible red marking, direct click recovery, archive confirmation, style restoration, continue and stop.');
 }
-run().catch(error=>{console.error(error);process.exitCode=1;});
+async function readiness(){
+const lesson=new URL('https://bg.izzi.digital/DOS/1/8.html');
+const ready={readyState:'complete',body:{},querySelector:()=>({classList:{contains:()=>true}})};
+const fresh={readyState:'loading',body:{},querySelector:()=>({classList:{contains:()=>mounted}}),querySelectorAll:()=>[]};
+let mounted=false,ticks=0;
+const frame={contentDocument:ready,contentWindow:{location:lesson}};
+const context={URL,URLSearchParams,AbortController,Map,Set,O:lesson.origin,console,clearTimeout(){},setTimeout(fn){queueMicrotask(()=>{ticks++;frame.contentDocument=fresh;if(ticks===2)fresh.readyState='interactive';if(ticks===3)mounted=true;fn();});return 1;}};
+const api=vm.runInNewContext(helper+';({captureLoadLesson,captureStrictChecks})',context);
+await api.captureLoadLesson(frame,lesson);assert.equal(ticks,3,'a same-URL retry must wait for its new document and mounted application');
+mounted=false;
+let issues=await api.captureStrictChecks(frame,lesson,async()=>{});
+assert.equal(issues.length,1);assert.equal(issues[0].kind,'page','an unmounted lesson must never pass capture');
+mounted=true;frame.contentWindow.location=new URL('https://bg.izzi.digital/login');
+issues=await api.captureStrictChecks(frame,lesson,async()=>{});assert.equal(issues[0].kind,'page','a login redirect must never pass capture');
+const started=[],releases=[];
+frame.contentWindow.location=lesson;frame.contentWindow.document=fresh;
+for(const [name,label] of [['captureLessonImages','images'],['captureLessonFiles','files'],['captureLessonMedia','media']])context[name]=(f,u,p,options)=>{started.push(label);assert(options.skipAvailable);return new Promise(resolve=>releases.push(()=>resolve({issues:[]})));};
+context.captureLessonLinks=async()=>{started.push('links');return {issues:[]};};
+context.fetch=async()=>({ok:true,json:async()=>({capture:true,available:true})});
+context.setTimeout=()=>1;
+const task=api.captureStrictChecks(frame,lesson,async()=>{},true);
+assert.deepEqual(started,['images','files','media'],'independent resource checks start together');
+for(const release of releases)release();issues=await task;
+assert.equal(issues.length,0);assert.equal(started[3],'links','wait for every parallel check before dependencies and final archive confirmation');
+console.log('PASS: fresh document navigation, Vue readiness, wrong-page rejection, parallel checks and archive barrier.');
+}
+run().then(readiness).catch(error=>{console.error(error);process.exitCode=1;});
