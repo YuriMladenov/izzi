@@ -211,7 +211,11 @@ window.__IZZI_OFFLINE_MEDIA__=PAYLOAD;
     # Observe parsing from the head, before media elements can try placeholder URLs.
     head=re.search(r'<head\b[^>]*>',t,re.I)
     pos=head.end() if head else 0
-    t=t[:pos]+shim+t[pos:]
+    # Also covers account names added by the archived page's scripts after load.
+    style=('<style id="izzi-offline-user-name">'
+           '.site-header .user-menu__name,#site-header #user-menu-label{display:none!important}'
+           '</style>')
+    t=t[:pos]+style+shim+t[pos:]
     return t.encode("utf-8")
 
 def parse_range(value,total):

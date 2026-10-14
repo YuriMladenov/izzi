@@ -1,7 +1,7 @@
 """SQLite resource/book indexes; legacy JSON is imported once and kept as backup."""
 import json, re, sqlite3
 from collections.abc import MutableMapping
-from contextlib import contextmanager
+from contextlib import closing,contextmanager
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 from replay_resolver import _canon_path
@@ -144,7 +144,8 @@ def write(path,value):
 def backup(state,target):
     """Consistent database backup, including committed WAL records."""
     with connect(Path(state)/DB_NAME) as c:
-        with sqlite3.connect(target) as destination:c.backup(destination)
+        # SQLite's connection context manager commits/rolls back without closing.
+        with closing(sqlite3.connect(target)) as destination:c.backup(destination)
 
 def update_entry(path,key,mutate,default):
     """Serialize a one-entry read/modify/write, including competing proxy writers."""

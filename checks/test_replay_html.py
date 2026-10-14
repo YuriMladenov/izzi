@@ -68,31 +68,31 @@ class ReplayHTML(unittest.TestCase):
         ])
         shim=re.search(r'<script>(.*?)</script>',t,re.S).group(1)
         result=subprocess.run(['node',str(Path(__file__).with_name('test_media_shim.js'))],
-                              input=shim,text=True,capture_output=True,timeout=10)
+                              input=shim,text=True,capture_output=True,timeout=10,encoding='utf-8')
         self.assertEqual(0,result.returncode,result.stdout+result.stderr)
 
     @unittest.skipUnless(shutil.which('node'),'Node.js required for bookmarklet runtime test')
     def test_bookmarklet_selection(self):
         result=subprocess.run(['node',str(Path(__file__).with_name('test_bookmarklet.js'))],
-                              text=True,capture_output=True,timeout=10)
+                              text=True,capture_output=True,timeout=10,encoding='utf-8')
         self.assertEqual(0,result.returncode,result.stdout+result.stderr)
 
     @unittest.skipUnless(shutil.which('node'),'Node.js required for strict capture runtime test')
     def test_strict_capture_runtime(self):
         result=subprocess.run(['node',str(Path(__file__).with_name('test_capture_strict.js'))],
-                              text=True,capture_output=True,timeout=10)
+                              text=True,capture_output=True,timeout=10,encoding='utf-8')
         self.assertEqual(0,result.returncode,result.stdout+result.stderr)
 
     @unittest.skipUnless(shutil.which('node'),'Node.js required for bulk download runtime test')
     def test_missing_download_runtime(self):
         result=subprocess.run(['node',str(Path(__file__).with_name('test_missing_download.js'))],
-                              text=True,capture_output=True,timeout=10)
+                              text=True,capture_output=True,timeout=10,encoding='utf-8')
         self.assertEqual(0,result.returncode,result.stdout+result.stderr)
 
     @unittest.skipUnless(shutil.which('node'),'Node.js required for WebUI search runtime test')
     def test_webui_search_runtime(self):
         result=subprocess.run(['node',str(Path(__file__).with_name('test_webui.js'))],
-                              text=True,capture_output=True,timeout=10)
+                              text=True,capture_output=True,timeout=10,encoding='utf-8')
         self.assertEqual(0,result.returncode,result.stdout+result.stderr)
 
 

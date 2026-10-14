@@ -68,10 +68,10 @@ with tempfile.TemporaryDirectory(prefix='izzi-validation-') as td:
     # A partial capture must never displace the assembled body for the same URL.
     mapping['https://bg.izzi.digital/datastore/test.mp4'].append(
         mapping['https://bg.izzi.digital/datastore/incomplete.mp4'][0].copy())
-    (state / 'url_map.json').write_text(json.dumps(mapping))
+    (state / 'url_map.json').write_text(json.dumps(mapping),encoding='utf-8')
     (state / 'books.json').write_text(json.dumps({'1408736': {'title': 'Fixture book',
         'lessons': {'1408788': {'id':'1408788', 'title':'Fixture lesson',
-                              'path':'/DOS/1408736/1408788.html'}}}}))
+                              'path':'/DOS/1408736/1408788.html'}}}}),encoding='utf-8')
     httpd = ThreadingHTTPServer(('127.0.0.1', 0), server.H)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()

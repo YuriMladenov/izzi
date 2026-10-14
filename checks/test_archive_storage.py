@@ -1,5 +1,5 @@
 """SQLite migration, indexed replay, concurrent edits and archive redistribution."""
-import concurrent.futures,hashlib,json,sys,tempfile,unittest
+import concurrent.futures,hashlib,json,sqlite3,sys,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -25,6 +25,35 @@ class Storage(unittest.TestCase):
         self.write('url_map.json',{self.url:[self.rec]})
         self.write('books.json',{'1':{'title':'Book for 5. class','lessons':{'2':{'title':'Lesson','path':'/DOS/1/2.html'}}},'3':{'title':'Other','lessons':{}}})
         archive_db.initialize(self.state)
+    def test_backup_closes_connections_on_success_and_failure(self):
+        self.prepare()
+        real_connect=sqlite3.connect
+        for interrupted in (False,True):
+            with self.subTest(interrupted=interrupted):
+                connections=[]
+                target=self.state/('failed-backup.sqlite3' if interrupted else 'backup.sqlite3')
+                class Connection(sqlite3.Connection):
+                    def backup(self,destination,*args,**kwargs):
+                        if interrupted:raise OSError('simulated backup interruption')
+                        return super().backup(destination,*args,**kwargs)
+                def tracked_connect(*args,**kwargs):
+                    connection=real_connect(*args,**kwargs,factory=Connection)
+                    connections.append(connection)
+                    return connection
+                try:
+                    with patch.object(archive_db.sqlite3,'connect',side_effect=tracked_connect):
+                        if interrupted:
+                            with self.assertRaisesRegex(OSError,'backup interruption'):archive_db.backup(self.state,target)
+                        else:archive_db.backup(self.state,target)
+                    self.assertEqual(2,len(connections))
+                    for connection in connections:
+                        with self.assertRaises(sqlite3.ProgrammingError):connection.execute('SELECT 1')
+                    if not interrupted:
+                        with archive_db.connect(target) as restored:
+                            row=restored.execute('SELECT data FROM resources WHERE url=?',(self.url,)).fetchone()
+                            self.assertEqual([self.rec],json.loads(row[0]))
+                finally:
+                    for connection in connections:connection.close()
     def test_sqlite_import_replay_invalidation_and_independent_writers(self):
         self.prepare();original=(self.state/'url_map.json').read_bytes()
         archive_db.initialize(self.state)
@@ -57,7 +86,7 @@ class Storage(unittest.TestCase):
         self.assertEqual(1,result['moved']);self.assertEqual(self.body,(self.archive/key).read_bytes())
         self.assertTrue((self.archive/self.old).is_file())
         self.assertEqual(key,import_har.load(self.state/'url_map.json',{})[self.url][0]['key'])
-        self.assertEqual(key,json.loads((self.state/'extra.json').read_text())['key'])
+        self.assertEqual(key,json.loads((self.state/'extra.json').read_text(encoding='utf-8'))['key'])
         self.assertTrue((Path(result['backup'])/'library.sqlite3').is_file())
         with patch.object(archive_cleanup,'now',return_value=__import__('time').time()+600):
             cleanup=archive_cleanup.report(self.archive,self.state)
@@ -86,7 +115,7 @@ class Storage(unittest.TestCase):
     def test_sqlite_corruption_and_failed_import_preserve_originals(self):
         self.write('url_map.json',{'u':'invalid'});self.write('books.json',{})
         with self.assertRaises(ValueError):archive_db.initialize(self.state)
-        self.assertEqual({'u':'invalid'},json.loads((self.state/'url_map.json').read_text()))
+        self.assertEqual({'u':'invalid'},json.loads((self.state/'url_map.json').read_text(encoding='utf-8')))
         self.prepare();(self.state/'library.sqlite3').write_bytes(b'broken sqlite')
         with self.assertRaises(ValueError):archive_state.load(self.state/'url_map.json',{})
         self.start_server();self.assertEqual(503,self.request('/')[0]);self.stop_server()
@@ -95,7 +124,7 @@ class Storage(unittest.TestCase):
         data=b'<html><title>Imported lesson</title></html>'
         url='https://bg.izzi.digital/DOS/3/4.html'
         har=self.root/'fixture.har'
-        har.write_text(json.dumps({'log':{'entries':[{'request':{'url':url,'method':'GET','headers':[]},'response':{'status':200,'headers':[],'content':{'mimeType':'text/html','text':data.decode()}}}]}}))
+        har.write_text(json.dumps({'log':{'entries':[{'request':{'url':url,'method':'GET','headers':[]},'response':{'status':200,'headers':[],'content':{'mimeType':'text/html','text':data.decode()}}}]}}),encoding='utf-8')
         with patch.multiple(import_har,ARCHIVE_DIR=self.archive,STATE_DIR=self.state,CAPTURES_DIR=self.root/'captures',URL_MAP_FILE=self.state/'url_map.json',BOOKS_FILE=self.state/'books.json',IMPORTS_FILE=self.state/'imports.json'),patch.object(sys,'argv',['import_har.py',str(har)]):
             import_har.main()
         mapping=import_har.load(self.state/'url_map.json',{})
@@ -122,13 +151,13 @@ class Storage(unittest.TestCase):
         with patch.object(migrate_archive,'save',side_effect=interrupted):
             with self.assertRaises(OSError):migrate_archive.apply(self.archive,self.state,plan['fingerprint'])
         self.assertTrue((self.archive/self.old).is_file())
-        self.assertEqual(self.old,json.loads((self.state/'extra.json').read_text())['key'])
+        self.assertEqual(self.old,json.loads((self.state/'extra.json').read_text(encoding='utf-8'))['key'])
         self.start_server();self.assertEqual(200,self.request('/DOS/1/2.html')[0]);self.stop_server()
         plan=migrate_archive.report(self.archive,self.state)
         self.assertEqual(0,plan['copy_bytes'])
         done=migrate_archive.apply(self.archive,self.state,plan['fingerprint'])
         key=blob_key(hashlib.sha256(self.body).hexdigest(),'.html')
-        self.assertEqual(key,json.loads((self.state/'extra.json').read_text())['key'])
+        self.assertEqual(key,json.loads((self.state/'extra.json').read_text(encoding='utf-8'))['key'])
         self.assertEqual(1,done['moved'])
 
     def test_sqlite_thread_writers(self):

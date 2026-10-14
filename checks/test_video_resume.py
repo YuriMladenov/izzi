@@ -49,8 +49,8 @@ class Resume(unittest.TestCase):
         self.assertEqual(206,status);self.assertEqual(self.body[14:40],data)
     def test_missing_manifest_parts_and_moved_windows_paths_are_recovered(self):
         self.partial(0,19)
-        manifest=range_assembler.manifest_path(self.url);data=json.loads(manifest.read_text());identity=range_assembler.uid(self.url)
-        data['ranges'][0][2]='D:\\old\\izzi\\state\\range_assembly\\'+identity+'\\0-19.part';manifest.write_text(json.dumps(data))
+        manifest=range_assembler.manifest_path(self.url);data=json.loads(manifest.read_text(encoding='utf-8'));identity=range_assembler.uid(self.url)
+        data['ranges'][0][2]='D:\\old\\izzi\\state\\range_assembly\\'+identity+'\\0-19.part';manifest.write_text(json.dumps(data),encoding='utf-8')
         self.assertEqual(20,video_resume.inspect()['videos'][0]['covered'])
         (self.state/'range_assembly'/identity/'0-19.part').unlink()
         # The separate archived body can repopulate the missing .part.

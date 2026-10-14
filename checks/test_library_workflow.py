@@ -38,7 +38,7 @@ class LibraryWorkflow(unittest.TestCase):
         for p in reversed(self.patches):p.stop()
         self.tmp.cleanup()
     def write(self,name,data):
-        (self.state/name).write_text(json.dumps(data))
+        (self.state/name).write_text(json.dumps(data,ensure_ascii=False),encoding='utf-8')
     def add(self,path,body=b'<html>lesson</html>',**extra):
         key=hashlib.sha256(body).hexdigest();(self.archive/key).write_bytes(body)
         record=dict(key=key,body_available=True,status=200,method='GET',size=len(body),decoded=True,content_type='text/html')
@@ -59,7 +59,7 @@ class LibraryWorkflow(unittest.TestCase):
         with response:return response.code,response.headers,response.read()
     def test_latest_incomplete_capture_overrides_old_done(self):
         self.completed(1)
-        session=json.loads((self.state/'capture_session.json').read_text())
+        session=json.loads((self.state/'capture_session.json').read_text(encoding='utf-8'))
         session['visits'].append(dict(kind='lesson-incomplete',book='1',lesson='0'))
         self.write('capture_session.json',session)
         self.assertEqual(self.report()['label'],'INCOMPLETE')
@@ -81,7 +81,7 @@ class LibraryWorkflow(unittest.TestCase):
         conn=http.client.HTTPConnection('127.0.0.1',self.httpd.server_port)
         conn.request('POST','/__catalog__/1',body,{'Content-Type':'application/x-www-form-urlencoded'})
         response=conn.getresponse();self.assertEqual(response.status,303);response.read();conn.close()
-        self.assertEqual(json.loads((self.state/'books.json').read_text()),books)
+        self.assertEqual(json.loads((self.state/'books.json').read_text(encoding='utf-8')),books)
         self.assertFalse((self.state/'progress').exists())
         self.stop_server();self.start_server()
         page=self.request('/__book__/1')[2].decode()
@@ -195,7 +195,7 @@ class LibraryWorkflow(unittest.TestCase):
         self.completed()
         record=self.mapping['https://bg.izzi.digital/DOS/1/1.html'][0]
         (self.archive/record['key']).unlink()
-        (self.state/'media_map.json').write_text('{broken')
+        (self.state/'media_map.json').write_text('{broken',encoding='utf-8')
         report=readiness.assess(self.root)
         self.assertTrue(report['errors']);self.assertEqual('INCOMPLETE',report['books'][0]['label'])
         self.assertTrue(report['books'][0]['missing_lessons'])
@@ -235,10 +235,10 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertEqual([],list(self.state.glob('*.tmp')))
         import_har.save(path,{'new':[]})
         self.assertEqual({'new':[]},import_har.load(path,{}))
-        path.write_text('{broken')
+        path.write_text('{broken',encoding='utf-8')
         with self.assertRaises(ValueError):import_har.load(path,{})
     def test_bad_urlmap_returns503_instead_of_mass_false_misses(self):
-        (self.state/'url_map.json').write_text('{broken')
+        (self.state/'url_map.json').write_text('{broken',encoding='utf-8')
         self.start_server()
         self.assertEqual(503,self.request('/DOS/1/0.html')[0])
         self.assertFalse((self.state/'missing_resources.jsonl').exists())
@@ -251,10 +251,10 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertEqual(1,resolved);self.assertEqual(1,len(missing));self.assertEqual(3,len(warnings))
         self.assertIn('missing.png',missing[0][1])
         self.start_server()
-        (self.state/'missing_resources.jsonl').write_text(''.join(json.dumps(e)+'\n' for e in events))
+        (self.state/'missing_resources.jsonl').write_text(''.join(json.dumps(e)+'\n' for e in events),encoding='utf-8')
         text=self.request('/__missing__')[2].decode()
         self.assertNotIn('restored.png',text);self.assertIn('UPSTREAM 404 WARNING',text)
-        self.assertEqual(5,len((self.state/'missing_resources.jsonl').read_text().splitlines()))
+        self.assertEqual(5,len((self.state/'missing_resources.jsonl').read_text(encoding='utf-8').splitlines()))
         self.assertIn('https://bg.izzi.digital/DOS/1/missing.png?__izzi_offline_recover=',text)
         self.assertEqual(4,text.count('>Изтегли</a>'))
         self.assertIn('rel="noopener noreferrer"',text)
@@ -358,11 +358,11 @@ class LibraryWorkflow(unittest.TestCase):
             self.assertIn('cdn.example.org',external_links.hosts())
             script=SimpleNamespace(request=http.Request.make('GET','https://cdn.example.org/app.js',headers={'Referer':'https://resources.example.org/'}),response=http.Response.make(200,b'console.log("app")',{'Content-Type':'application/javascript'}))
             capture_addon.request(script);capture_addon.response(script)
-            mapping=json.loads((self.state/'url_map.json').read_text())
+            mapping=json.loads((self.state/'url_map.json').read_text(encoding='utf-8'))
             self.assertTrue(external_links.status(root,mapping,self.archive)['available'])
             private=SimpleNamespace(request=http.Request.make('POST','https://resources.example.org/api/save',content=b'private'),response=http.Response.make(200,b'private'))
             capture_addon.response(private)
-            self.assertNotIn(private.request.pretty_url,json.loads((self.state/'url_map.json').read_text()))
+            self.assertNotIn(private.request.pretty_url,json.loads((self.state/'url_map.json').read_text(encoding='utf-8')))
 
     def test_missing_only_reuses_complete_assets_and_requests_missing_ones(self):
         try:
@@ -407,10 +407,10 @@ class LibraryWorkflow(unittest.TestCase):
         body=urlencode({'token':operations.tasks.token}).encode()
         with patch.object(operations,'capture_port_busy',return_value=True):self.assertEqual(self.request('/__delete_book__/1',body,headers)[0],400)
         with patch.object(operations,'capture_port_busy',return_value=False):self.assertEqual(self.request('/__delete_book__/1',body,headers)[0],200)
-        self.assertNotIn('1',json.loads((self.state/'books.json').read_text()))
+        self.assertNotIn('1',json.loads((self.state/'books.json').read_text(encoding='utf-8')))
         self.assertFalse((self.archive/own['key']).exists())
         self.assertTrue((self.archive/shared['key']).exists())
-        self.assertEqual(json.loads((self.state/'capture_session.json').read_text())['visits'][0]['book'],'3')
+        self.assertEqual(json.loads((self.state/'capture_session.json').read_text(encoding='utf-8'))['visits'][0]['book'],'3')
         self.assertEqual(self.request('/__book__/1')[0],404)
 
     def test_youtube_links_play_local_video_and_reuse_download(self):
@@ -450,7 +450,7 @@ class LibraryWorkflow(unittest.TestCase):
         updated=archive_state.load(path,{})
         self.assertIsNot(first,updated)
         self.assertIsNotNone(find(updated,'bg.izzi.digital','/DOS/1/new.js',''))
-        path.write_text('{bad json')
+        path.write_text('{bad json',encoding='utf-8')
         with self.assertRaises(ValueError):archive_state.load(path,{})
         path.unlink();self.assertEqual(archive_state.load(path,{}),{})
 
@@ -519,7 +519,7 @@ class LibraryWorkflow(unittest.TestCase):
         archive_cleanup.restore(self.archive,self.state,batch)
         self.assertTrue(orphan.exists());self.assertTrue(completed.exists())
         trash=archive_cleanup.trash_report(self.state,batch)
-        manifest=json.loads((self.state/'cleanup_trash'/batch/'manifest.json').read_text());manifest['changed']=True
+        manifest=json.loads((self.state/'cleanup_trash'/batch/'manifest.json').read_text(encoding='utf-8'));manifest['changed']=True
         self.write('cleanup_trash/'+batch+'/manifest.json',manifest)
         with self.assertRaisesRegex(ValueError,'променена'):archive_cleanup.purge(self.state,batch,trash['fingerprint'])
         trash=archive_cleanup.trash_report(self.state,batch)
@@ -546,7 +546,7 @@ class LibraryWorkflow(unittest.TestCase):
         with patch.object(operations,'capture_port_busy',return_value=True):self.assertEqual(self.request('/__cleanup__',body,headers)[0],400)
         with patch.object(operations,'capture_port_busy',return_value=False):self.assertEqual(self.request('/__cleanup__',body,headers)[0],200)
         self.assertFalse(orphan.exists())
-        (self.state/'url_map.json').write_text('{bad')
+        (self.state/'url_map.json').write_text('{bad',encoding='utf-8')
         with self.assertRaises(ValueError):archive_cleanup.report(self.archive,self.state)
         blocked=self.request('/__cleanup__')[2].decode()
         self.assertIn('Почистването е блокирано',blocked);self.assertIn('Възстанови',blocked)
@@ -583,7 +583,7 @@ class LibraryWorkflow(unittest.TestCase):
             self.assertEqual(code,200);self.assertTrue(headers['Content-Type'].startswith(mime));self.assertTrue(body)
         self.assertIn('capture_mode.bat',self.request('/__help__')[2].decode())
         # UI assets stay available when private archive state is malformed.
-        (self.state/'url_map.json').write_text('{broken')
+        (self.state/'url_map.json').write_text('{broken',encoding='utf-8')
         self.assertEqual(self.request('/__ui__/app.css')[0],200)
 
     def test_explicit_class_in_title_overrides_conflicting_catalogue_number(self):
@@ -711,10 +711,10 @@ class LibraryWorkflow(unittest.TestCase):
         status=json.loads(self.request('/__offline__/asset-status?url='+urllib.parse.quote(target,safe=''))[2])
         self.assertTrue(status['available'])
         self.assertEqual([],self.report()['bad_mapping'])
-        before=(self.state/'missing_resources.jsonl').read_text() if (self.state/'missing_resources.jsonl').exists() else ''
+        before=(self.state/'missing_resources.jsonl').read_text(encoding='utf-8') if (self.state/'missing_resources.jsonl').exists() else ''
         probe=json.loads(self.request('/__offline_capture__/image_status')[2])
         self.assertFalse(probe['capture'])
-        after=(self.state/'missing_resources.jsonl').read_text() if (self.state/'missing_resources.jsonl').exists() else ''
+        after=(self.state/'missing_resources.jsonl').read_text(encoding='utf-8') if (self.state/'missing_resources.jsonl').exists() else ''
         self.assertEqual(before,after)
 
     def test_video_login_page_is_not_reported_as_captured_media(self):
@@ -739,7 +739,7 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertEqual(200,self.request('/__host__/api.izzi.digital/api/write',payload,
             {'Referer':self.base+'/DOS/1/10.html?secret=never-log-ref-query'})[0])
         self.assertEqual(200,self.request('/api/write',b'{"bookmark":1}',{'Referer':self.base+'/DOS/2/20.html'})[0])
-        row=json.loads((self.state/'progress/1.jsonl').read_text())
+        row=json.loads((self.state/'progress/1.jsonl').read_text(encoding='utf-8'))
         self.assertEqual(payload,base64.b64decode(row['body_base64']))
         self.assertEqual(len(payload),row['size']);self.assertNotIn('secret=',row['referer'])
         self.stop_server();self.start_server()
@@ -752,7 +752,7 @@ class LibraryWorkflow(unittest.TestCase):
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
             self.assertEqual([200]*12,list(pool.map(write,range(12))))
         self.assertEqual(12,progress_journal.summarize(self.state/'progress')['records'])
-        with (self.state/'progress/1.jsonl').open('a') as f:f.write('{truncated\n')
+        with (self.state/'progress/1.jsonl').open('a',encoding='utf-8') as f:f.write('{truncated\n')
         self.assertEqual(1,progress_journal.summarize(self.state/'progress')['invalid_lines'])
     def test_write_failure_never_reports_saved(self):
         self.start_server()
