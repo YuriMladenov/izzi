@@ -57,6 +57,49 @@ class LibraryWorkflow(unittest.TestCase):
         try:response=self.opener.open(req,timeout=5)
         except urllib.error.HTTPError as error:response=error
         with response:return response.code,response.headers,response.read()
+    def test_bundled_katex_fallback_cache_and_archive_precedence(self):
+        from urllib.parse import quote
+        path='/DOS/888827/components/fonts/KaTeX_Main-Regular.woff'
+        self.add(path,b'<html>Not found</html>',status=404)
+        self.write('books.json',{})
+        self.start_server()
+        for name in ('KaTeX_Main-Regular','KaTeX_Math-Italic','KaTeX_Size3-Regular'):
+            for ext,magic in (('.woff',b'wOFF'),('.woff2',b'wOF2')):
+                target='/DOS/888827/components/fonts/'+name+ext
+                status,headers,body=self.request(target+'?v=1',headers={'Host':'192.168.1.20'})
+                self.assertEqual(200,status);self.assertEqual(magic,body[:4])
+                self.assertEqual('font/woff2' if ext=='.woff2' else 'font/woff',headers['Content-Type'])
+                self.assertEqual(304,self.request(target,headers={'If-None-Match':headers['ETag']})[0])
+        self.assertEqual(200,self.request('/__host__/bg.izzi.digital'+path)[0])
+        probe='/__offline__/asset-status?url='+quote('https://bg.izzi.digital'+path,safe='')
+        self.assertTrue(json.loads(self.request(probe)[2])['available'])
+        missing,warnings,resolved=server.current_missing([{'host':'bg.izzi.digital','path':path}],self.mapping)
+        self.assertEqual(([],[],1),(missing,warnings,resolved))
+        original=b'wOFF'+b'archived original font'*10
+        self.add(path,original,content_type='font/woff')
+        self.assertEqual(original,self.request(path)[2])
+        self.assertIsNone(server.bundled_font('external.example',path))
+        self.assertIsNone(server.bundled_font('bg.izzi.digital','/DOS/888827/components/fonts/../LICENSE'))
+        self.assertEqual(404,self.request('/DOS/888827/components/fonts/KaTeX_Unknown.woff')[0])
+    def test_bundled_text_icon_fonts_and_alternate_katex_path(self):
+        paths=(
+            '/DOS/888827/profil/dist/common/katex/fonts/KaTeX_Size3-Regular.woff2',
+            '/DOS/412693/profil/dist/izzi/fonts/IBMPlexSans/IBMPlexSans-BoldItalic.woff2',
+            '/DOS/888827/profil/dist/common/icons/material/MaterialIcons.woff',
+            '/DOS/888827/datastore/blocks/12507701/assets/fonts/Open_Sans/OpenSans-Regular.woff',
+        )
+        for path in paths:self.add(path,b'<html>404</html>',status=404)
+        self.write('books.json',{});self.start_server()
+        for path in paths:
+            status,headers,body=self.request(path,headers={'Host':'192.168.1.20'})
+            self.assertEqual(200,status);self.assertIn(body[:4],(b'wOFF',b'wOF2'))
+            self.assertEqual(304,self.request(path,headers={'If-None-Match':headers['ETag']})[0])
+            self.assertEqual(([],[],1),server.current_missing([{'host':'bg.izzi.digital','path':path}],self.mapping))
+            original=b'wOFF'+b'archived font'*20
+            self.add(path,original,content_type='font/woff')
+            self.assertEqual(original,self.request(path)[2])
+        self.assertIsNone(server.bundled_font('bg.izzi.digital','/DOS/888827/profil/dist/izzi/fonts/IBMPlexSansHB/IBMPlexSans-Regular.woff2'))
+        self.assertIsNone(server.bundled_font('bg.izzi.digital','/DOS/888827/datastore/blocks/12507701/assets/fonts/Open_Sans/MyriadPro-Regular.woff'))
     def test_latest_incomplete_capture_overrides_old_done(self):
         self.completed(1)
         session=json.loads((self.state/'capture_session.json').read_text(encoding='utf-8'))

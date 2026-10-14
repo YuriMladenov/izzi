@@ -47,6 +47,24 @@ def usable_font(r):
 def usable_image(r):
     return usable_body(r,ARCHIVE_DIR,'.png')
 
+def bundled_font(host,path):
+    if not _izzi_host(host):return None
+    base=Path(__file__).with_name('vendor')
+    patterns=(
+        (r'(?:/DOS/\d+)?/(?:components|profil/dist/common/katex)/fonts/(KaTeX_[A-Za-z0-9-]+\.woff2?)','katex/dist/fonts'),
+        (r'(?:/DOS/\d+)?/profil/dist/izzi/fonts/IBMPlexSans/(IBMPlexSans-(?:Regular|Italic|Medium|MediumItalic|Bold|BoldItalic)\.woff2?)','ibm-plex-sans'),
+        (r'(?:/DOS/\d+)?/profil/dist/common/icons/material/(MaterialIcons(?:-Regular)?\.woff2?)','material-icons'),
+        (r'(?:/DOS/\d+)?/datastore/blocks/\d+/assets/fonts/Open_Sans/(OpenSans-(?:Regular|Italic|Light|LightItalic|Bold|BoldItalic)\.woff2?)','open-sans'),
+    )
+    for pattern,folder in patterns:
+        match=re.fullmatch(pattern,path)
+        if not match:continue
+        name=match[1]
+        if folder=='material-icons':name=name.replace('MaterialIcons.','MaterialIcons-Regular.')
+        font=base/folder/name
+        return font if font.is_file() else None
+    return None
+
 def rewrite(b,host=None):
     # Called ONLY for already-decoded textual resources.
     t=b.decode("utf-8",errors="strict")
@@ -260,7 +278,7 @@ def current_missing(events,mapping):
         if key in seen:continue
         seen.add(key);ext=Path(path).suffix.lower()
         row=find(mapping,host,path,query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
-        if row:resolved+=1;continue
+        if row or bundled_font(host,path):resolved+=1;continue
         old=find(mapping,host,path,query)
         category='UPSTREAM 404 WARNING' if old and old.get('status')==404 else (
             'OPTIONAL' if ext=='.map' or path in ('/favicon.ico','/datastore/favicon.ico') else 'MISSING')
@@ -364,6 +382,9 @@ class H(BaseHTTPRequestHandler):
         ext=Path(unquote(path)).suffix.lower()
         usable=lambda r:usable_body(r,ARCHIVE_DIR,ext)
         r=find(m,host,path,q,usable,book)
+        if not r:
+            font=bundled_font(host,path)
+            if font:return self.sendfile(font,replay_mime(path))
         # Retain real upstream errors when there is no usable body alternative.
         if not r and usable:
             error=find(m,host,path,q,None,book)
@@ -520,7 +541,7 @@ class H(BaseHTTPRequestHandler):
                 return self.sendb(b'{"available":false}',"application/json",400)
             ext=Path(target.path).suffix.lower()
             record=find(m,target.hostname,target.path,target.query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
-            return self.sendb(json.dumps({'available':bool(record)}).encode(),'application/json')
+            return self.sendb(json.dumps({'available':bool(record or bundled_font(target.hostname,target.path))}).encode(),'application/json')
         if p.path=='/__journal__':
             summary=progress_journal.summarize(PROGRESS_DIR)
             content='<h1>Локален журнал</h1><p>Записани заявки: %d · Невалидни редове: %d</p><p>Журналът пази локални заявки; това не е възстановен прогрес от оригиналния сървър. Тук се показват само броячи.</p>'%(summary['records'],summary['invalid_lines'])
