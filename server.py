@@ -261,6 +261,19 @@ if(typeof window.baseUrl==='undefined')window.baseUrl='/';
            '.site-header .user-menu__name,#site-header #user-menu-label{display:none!important}'
            '</style>')
     t=t[:pos]+style+shim+t[pos:]
+    # Keep navigation outside Vue's lesson root, including when its app fails
+    # to mount. A relative origin path also works for readers over LAN.
+    if 'id="izzi-library-return"' not in t:
+        home=('<a id="izzi-library-return" href="/" target="_top" '
+              'aria-label="Към началната страница на библиотеката" '
+              'style="position:fixed!important;left:12px!important;bottom:12px!important;'
+              'z-index:2147483647!important;display:inline-flex!important;align-items:center;'
+              'min-height:44px;box-sizing:border-box;padding:10px 16px;border:1px solid #205fab;'
+              'border-radius:10px;background:#fff;color:#205fab;font:600 16px/1.4 sans-serif;'
+              'text-decoration:none;box-shadow:0 2px 10px #0003">← Библиотека</a>')
+        body=re.search(r'<body\b[^>]*>',t,re.I)
+        at=body.end() if body else len(t)
+        t=t[:at]+home+t[at:]
     return t.encode("utf-8")
 
 def parse_range(value,total):
