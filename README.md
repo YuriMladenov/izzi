@@ -175,6 +175,16 @@ Addon пази bodies в `archive`, URL записите и каталожнит
 
 `requirements-capture.txt` е pip dependency декларацията за Windows capture. `tools/capture-requirements.lock` пази resolved версии за облачния setup. `tools/setup.sh` създава Linux `.venv`, инсталира lock dependencies, проверява pip packages и изпълнява media contract test. `tools/SETUP_REPORT.md` описва проверената среда и ограниченията; не е инструкция за възстановяване на личен архив.
 
+## Инсталиране и обновяване (Debian)
+
+`install_debian.sh` инсталира чрез apt Git, Python/venv, Firefox ESR, FFmpeg, Node.js и помощни инструменти; създава `.venv`, инсталира capture и YouTube зависимостите и изпълнява media contract проверката. Ако няма подходящ Node.js или Deno, изтегля официалния Deno инсталатор през HTTPS и го изпълнява за текущия потребител. За apt е нужен root или sudo. Стартирай скрипта като обикновен потребител, за да останат проектът и `.venv` твоя собственост. Firefox proxy и сертификатът се настройват ръчно.
+
+Ако вече си клонирал проекта: `bash install_debian.sh`. Ако си изтеглил само скрипта в друга папка: `bash install_debian.sh "$HOME/IZZI/izzi"`; той клонира `WebUI` в посочената папка, без да презаписва непразна папка. Без аргумент използва текущия checkout или `~/IZZI/izzi`.
+
+`update_debian.sh` се стартира с `bash update_debian.sh`. Ако си свалил скрипта отделно, дръж го извън checkout и посочи папката: `bash update_debian.sh "$HOME/IZZI/izzi"`. Изисква клон `WebUI`, чист working tree и спряна библиотека/capture, проверява портове 8765/8877, изпълнява `git pull --ff-only`, обновява Python зависимостите и проверява инсталацията. Не изпълнява reset/clean и не премахва `archive` или `state`. При грешка спира с ненулев exit code; ако Git обновяването е минало, а pip е отказал, кодът вече е обновен — отстрани причината и повтори скрипта.
+
+За стартиране от папката на проекта: `PATH="$HOME/.deno/bin:$PATH" .venv/bin/python -u server.py`. Библиотеката се отваря на `http://127.0.0.1:8765/`; capture и проверките могат да се стартират от локалното WebUI меню. За самостоятелен capture: `PATH="$HOME/.deno/bin:$PATH" .venv/bin/mitmdump --listen-host 0.0.0.0 -p 8877 -s capture_addon.py`. Скриптовете не стартират услуги при boot; при преминаване от Windows копирай целите `archive` и `state` при спрени процеси.
+
 ## Инсталиране и обновяване (Windows)
 
 Необходими са Python с командата `py`, Firefox и Git за обновяване от GitHub.
