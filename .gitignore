@@ -7,3 +7,5 @@ __pycache__/
 *.pyc
 tools/pip-cache/
 tools/mitmproxy/
+vendor/geogebra/
+vendor/geogebra-backups/

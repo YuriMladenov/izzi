@@ -1,4 +1,5 @@
-import hashlib,mimetypes,json,re,time
+import asyncio,hashlib,mimetypes,json,re,time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlparse,parse_qs,urljoin
 from mitmproxy import http
@@ -16,15 +17,17 @@ from cache_bust_recovery import canonical_url,is_recovery_url,note as note_recov
 import external_links
 import capture_completion
 import archive_db
+import geogebra_runtime
 from archive_storage import blob_key
 
 def running():
     archive_db.initialize(STATE_DIR)
+    external_links.hosts()
 
 MISSING_ONLY=False
 UPDATE_BOOK=''
 UPDATE_UNTIL=0
-STATIC_EXT={'.html','.htm','.js','.css','.json','.svg','.png','.jpg','.jpeg','.gif','.webp','.woff','.woff2','.ttf','.mp4','.mp3','.webm','.pdf','.sb3','.sb2','.zip','.exe'}
+STATIC_EXT={'.html','.htm','.js','.css','.json','.svg','.png','.jpg','.jpeg','.gif','.webp','.woff','.woff2','.ttf','.mp4','.mp3','.webm','.pdf','.sb3','.sb2','.zip','.exe','.ggb'}
 
 MAX_BODY=250*1024*1024
 # Session headers stay in proxy memory, scoped to the exact video URL.
@@ -35,8 +38,26 @@ def allowed(host):
     h=(host or "").lower()
     return h=="izzi.digital" or h.endswith(".izzi.digital") or h in external_links.hosts() or h=="cdnjs.cloudflare.com"
 
-def request(flow:http.HTTPFlow):
+# Hooks return an awaitable under mitmproxy, while synchronous diagnostic callers
+# retain the same API. A single archive worker preserves response write ordering.
+WORKERS={}
+def worker(name):
+    if name not in WORKERS:WORKERS[name]=ThreadPoolExecutor(max_workers=1,thread_name_prefix='izzi-'+name)
+    return WORKERS[name]
+
+async def dispatch(name,function,flow):
+    return await asyncio.get_running_loop().run_in_executor(worker(name),function,flow)
+
+def request_sync(flow):
     with archive_db.read_session():_request(flow)
+
+def request(flow:http.HTTPFlow):
+    try:asyncio.get_running_loop()
+    except RuntimeError:return request_sync(flow)
+    p=urlparse(flow.request.pretty_url)
+    if (p.hostname==SOURCE_HOST and p.path.startswith('/__offline_capture__/')) or flow.request.headers.get('X-IZZI-Resume') or MISSING_ONLY or '/GeoGebra/HTML5/' in p.path:
+        return dispatch('control',request_sync,flow)
+    return request_sync(flow)
 
 def _request(flow):
     global MISSING_ONLY,UPDATE_BOOK,UPDATE_UNTIL
@@ -86,7 +107,6 @@ def _request(flow):
         except (OSError,ValueError,AttributeError) as error:
             flow.response=http.Response.make(503,b'{"error":"Lesson archive status unavailable"}',{'Content-Type':'application/json'})
         return
-    external_links.associate(flow.request.pretty_url,flow.request.headers.get('referer',''))
 
     # Local-only control endpoints: never forwarded upstream.
     if p.hostname==SOURCE_HOST and p.path=="/__offline_capture__/image_status":
@@ -97,10 +117,14 @@ def _request(flow):
             ext=Path(target.path).suffix.lower()
             row=find(mapping,target.hostname or '',target.path,target.query,
                      lambda r:usable_body(r,ARCHIVE_DIR,ext)) if allowed(target.hostname) else None
-            body=json.dumps({'capture':True,'available':bool(row)}).encode()
+            body=json.dumps({'capture':True,'available':bool(row or geogebra_runtime.asset(target.hostname,target.path))}).encode()
             flow.response=http.Response.make(200,body,{'Content-Type':'application/json','Cache-Control':'no-store'})
         except (OSError,ValueError):
             flow.response=http.Response.make(503,b'{"capture":true,"available":false}',{'Content-Type':'application/json'})
+        return
+
+    if p.hostname==SOURCE_HOST and p.path=='/__offline_capture__/geogebra_status':
+        flow.response=http.Response.make(200,json.dumps({'installed':geogebra_runtime.installed()}).encode(),{'Content-Type':'application/json','Cache-Control':'no-store'})
         return
 
     if p.hostname=="bg.izzi.digital" and p.path=="/__offline_capture__/recovery_manifest":
@@ -137,6 +161,11 @@ def _request(flow):
         return
 
     capture_completion.watch(flow.request.pretty_url,flow.request.method,flow.request.headers.get('referer',''),getattr(flow,'id',id(flow)))
+    runtime=geogebra_runtime.asset(p.hostname,p.path) if flow.request.method=='GET' else None
+    if runtime and not find(load_json(URL_MAP_FILE,{}),p.hostname,p.path,p.query,lambda row:usable_body(row,ARCHIVE_DIR,Path(p.path).suffix.lower())):
+        ct=mimetypes.guess_type(p.path)[0] or 'application/octet-stream'
+        flow.response=http.Response.make(200,runtime.read_bytes(),{'Content-Type':ct,'Cache-Control':'no-store','X-IZZI-Archive':'1'})
+        return
 
     if not getattr(flow,'metadata',{}).get('izzi_resume') and MISSING_ONLY and time.monotonic()<UPDATE_UNTIL and flow.request.method.upper()=='GET' and allowed(p.hostname):
         owner=re.search(r'/DOS/(\d+)/',p.path) or re.search(r'/DOS/(\d+)/',flow.request.headers.get('referer',''))
@@ -161,12 +190,20 @@ def _request(flow):
         for h in ("if-none-match","if-modified-since"):
             if h in flow.request.headers:
                 del flow.request.headers[h]; removed.append(h)
-        flow.request.headers["Cache-Control"]="no-store, no-cache, max-age=0" if recovering else "no-cache"
-        flow.request.headers["Pragma"]="no-cache"
+        flow.request.headers["cache-control"]="no-store, no-cache, max-age=0" if recovering else "no-cache"
+        flow.request.headers["pragma"]="no-cache"
         if removed: print("[FORCE FRESH]",",".join(removed),p.path)
         if recovering: print("[RECOVERY REQUEST]",canonical_url(flow.request.pretty_url))
 
 def response(flow:http.HTTPFlow):
+    p=urlparse(flow.request.pretty_url)
+    if flow.response is None or flow.response.headers.get('X-IZZI-Archive')=='1' or (p.hostname==SOURCE_HOST and p.path.startswith('/__offline_capture__/')) or not allowed(flow.request.host):
+        capture_completion.finish(getattr(flow,'id',id(flow)));return
+    try:asyncio.get_running_loop()
+    except RuntimeError:return response_sync(flow)
+    return dispatch('archive',response_sync,flow)
+
+def response_sync(flow):
     try:
         with archive_db.read_session():_response(flow)
     finally:capture_completion.finish(getattr(flow,'id',id(flow)))
@@ -187,6 +224,7 @@ def _response(flow):
 
     if not allowed(flow.request.host):return
     if not (flow.request.host=="izzi.digital" or flow.request.host.endswith(".izzi.digital")) and flow.request.method.upper() not in ("GET","HEAD"):return
+    external_links.associate(url,flow.request.headers.get('referer',''))
     status=flow.response.status_code
     if status==304:
         if recovering: note_recovery(url,status,0)
@@ -259,5 +297,7 @@ def error(flow:http.HTTPFlow):
     capture_completion.finish(getattr(flow,'id',id(flow)))
 
 def done():
+    for pool in WORKERS.values():pool.shutdown(wait=True)
+    WORKERS.clear()
     from capture_observed import flush
     flush()

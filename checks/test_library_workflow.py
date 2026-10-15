@@ -2,6 +2,7 @@
 import base64
 import concurrent.futures
 import hashlib
+import gzip
 import http.client
 import json
 import sys
@@ -72,6 +73,45 @@ class LibraryWorkflow(unittest.TestCase):
             self.assertNotEqual(headers['ETag'],new_headers['ETag']);self.assertEqual(2,rewrite.call_count)
             (self.archive/row['key']).unlink()
             self.assertEqual(404,self.request('/DOS/1/profil/test.js')[0])
+
+    def test_gzip_static_variants_head_cache_and_opt_out(self):
+        data=b'const text="lesson content";\n'*3000
+        row=self.add('/DOS/1/profil/test.js',data,content_type='application/javascript')
+        self.start_server()
+        path='/DOS/1/profil/test.js'
+        _,plain_headers,plain=self.request(path,headers={'Accept-Encoding':'identity'})
+        self.assertEqual(data,plain)
+        with patch.object(server.gzip,'compress',wraps=server.gzip.compress) as compress:
+            status,headers,packed=self.request(path,headers={'Accept-Encoding':'br, gzip'})
+            self.assertEqual(200,status);self.assertEqual('gzip',headers['Content-Encoding'])
+            self.assertEqual('Accept-Encoding',headers['Vary']);self.assertEqual(data,gzip.decompress(packed))
+            self.assertLess(len(packed),len(data)//4)
+            self.assertNotEqual(plain_headers['ETag'],headers['ETag'])
+            status,head,body=self.request(path,headers={'Accept-Encoding':'gzip'},method='HEAD')
+            self.assertEqual(200,status);self.assertEqual(b'',body)
+            self.assertEqual(str(len(packed)),head['Content-Length'])
+            status,revalidated,body=self.request(path,headers={'Accept-Encoding':'gzip','If-None-Match':headers['ETag']})
+            self.assertEqual(304,status);self.assertEqual(b'',body)
+            self.assertEqual('Accept-Encoding',revalidated['Vary']);self.assertEqual(1,compress.call_count)
+        for encoding in ('identity','gzip;q=0, *;q=1','br'):
+            status,response,body=self.request(path,headers={'Accept-Encoding':encoding,'If-None-Match':headers['ETag']})
+            self.assertEqual(200,status);self.assertIsNone(response.get('Content-Encoding'));self.assertEqual(data,body)
+        (self.archive/row['key']).write_bytes(data.replace(b'lesson',b'newest'))
+        status,updated,body=self.request(path,headers={'Accept-Encoding':'gzip','If-None-Match':headers['ETag']})
+        self.assertEqual(200,status);self.assertNotEqual(headers['ETag'],updated['ETag'])
+        self.assertIn(b'newest',gzip.decompress(body))
+
+    def test_gzip_html_keeps_navigation_and_media_range_bytes_unchanged(self):
+        self.add('/DOS/1/2.html',b'<html><head><meta charset="UTF-8"></head><body>'+b'lesson '*1000+b'</body></html>')
+        media=b'\x00\x00\x00\x18ftypmp42'+b'video'*1000
+        self.add('/test.mp4',media,content_type='video/mp4');self.start_server()
+        status,headers,body=self.request('/DOS/1/2.html',headers={'Accept-Encoding':'gzip'})
+        self.assertEqual(200,status);self.assertEqual('gzip',headers['Content-Encoding'])
+        self.assertIn(b'izzi-library-return',gzip.decompress(body))
+        for method in ('GET','HEAD'):
+            status,headers,body=self.request('/test.mp4',headers={'Accept-Encoding':'gzip','Range':'bytes=2-15'},method=method)
+            self.assertEqual(206,status);self.assertIsNone(headers.get('Content-Encoding'))
+            self.assertEqual(media[2:16] if method=='GET' else b'',body)
 
     def test_parallel_cache_builds_share_same_file_without_blocking_other_files(self):
         import replay_cache

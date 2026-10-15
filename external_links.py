@@ -1,12 +1,14 @@
 """Explicit lesson links and the GET dependencies loaded through the capture proxy."""
-import ipaddress,re
+import ipaddress,re,threading
 from urllib.parse import urlsplit,urljoin
 from pathlib import Path
 from config import STATE_DIR
 from import_har import load,save
 from replay_resolver import find,usable_body
+from cache_bust_recovery import canonical_url
 FILE=STATE_DIR/'lesson_links.json'
-HOST_CACHE=None
+LOCK=threading.RLock()
+INDEX=None
 BLOCKED=('google-analytics.com','googletagmanager.com','youtube.com','youtube-nocookie.com','doubleclick.net')
 
 def valid_url(value):
@@ -22,37 +24,84 @@ def valid_url(value):
     except ValueError:return False
 
 def normalized(value):
-    p=urlsplit(value);return p._replace(fragment='').geturl()
+    return canonical_url(value)
+
+def stamp():
+    try:
+        info=FILE.stat();return str(FILE.resolve()),info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns
+    except FileNotFoundError:return str(FILE.resolve()),None
+
+def state():
+    """Indexes avoid rereading/scanning a large dependency JSON per request."""
+    global INDEX
+    signature=stamp()
+    if INDEX is not None and INDEX['stamp']==signature:return INDEX
+    data=load(FILE,{})
+    owners={};by_host={}
+    for root,entry in data.items():
+        for value in [root,*entry.get('resources',[])]:
+            if not valid_url(value):continue
+            value=normalized(value);owners.setdefault(value,set()).add(root)
+            by_host.setdefault(urlsplit(value).hostname,set()).add(root)
+    INDEX={'stamp':signature,'data':data,'owners':owners,'by_host':by_host,'hosts':frozenset(by_host)}
+    return INDEX
+
+def commit(data):
+    current=state();save(FILE,data)
+    current['data']=data;current['stamp']=stamp();current['hosts']=frozenset(current['by_host'])
 
 def register(value):
     if not valid_url(value):raise ValueError('Unsupported link URL')
-    value=normalized(value);data=load(FILE,{})
-    data.setdefault(value,{'resources':[value]});save(FILE,data)
+    global INDEX
+    value=normalized(value)
+    with LOCK:
+        current=state()
+        if value in current['data']:return
+        data=dict(current['data']);data[value]={'resources':[value]}
+        current['owners'].setdefault(value,set()).add(value)
+        current['by_host'].setdefault(urlsplit(value).hostname,set()).add(value)
+        try:commit(data)
+        except Exception:
+            INDEX=None;raise
 
 def hosts():
-    global HOST_CACHE
-    from archive_state import load as cached_load
-    data=cached_load(FILE,{})
-    if HOST_CACHE and HOST_CACHE[0] is data:return HOST_CACHE[1]
-    result=frozenset(urlsplit(url).hostname for entry in data.values() for url in entry.get('resources',[]) if valid_url(url))
-    HOST_CACHE=(data,result)
-    return result
+    current=INDEX
+    if current is not None and current['stamp']==stamp():return current['hosts']
+    with LOCK:return state()['hosts']
 
 def associate(url,referer):
-    if not valid_url(url):return
-    url=normalized(url);referer=normalized(referer) if referer else ''
-    data=load(FILE,{});changed=False
-    for root,entry in data.items():
-        resources=entry.get('resources',[])
-        if url==root or referer in resources or (referer and urlsplit(referer).path in ('','/') and urlsplit(referer).hostname in {urlsplit(r).hostname for r in resources}):
-            if url not in resources:
-                if len(resources)<2000:resources.append(url)
-                else:entry['truncated']=True
-                changed=True
-    if changed:save(FILE,data)
+    associate_many([(url,referer)])
+
+def associate_many(pairs):
+    global INDEX
+    with LOCK:
+        current=state();data=dict(current['data']);changed=set()
+        try:
+            for url,referer in pairs:
+                if not valid_url(url):continue
+                url=normalized(url);referer=normalized(referer) if referer else ''
+                roots=set(current['owners'].get(url,()))|set(current['owners'].get(referer,()))
+                ref=urlsplit(referer)
+                # Platform home/API traffic cannot identify one linked app.
+                # Never attach the whole bookshelf to every IZZI link.
+                if ref.path in ('','/') and ref.hostname and not (ref.hostname=='izzi.digital' or ref.hostname.endswith('.izzi.digital')):
+                    roots.update(current['by_host'].get(ref.hostname,()))
+                for root in roots:
+                    if root in current['owners'].get(url,()):continue
+                    if root not in changed:
+                        data[root]={**data[root],'resources':list(data[root].get('resources',[]))};changed.add(root)
+                    entry=data[root];resources=entry['resources']
+                    if len(resources)>=2000:entry['truncated']=True;continue
+                    resources.append(url)
+                    current['owners'].setdefault(url,set()).add(root)
+                    current['by_host'].setdefault(urlsplit(url).hostname,set()).add(root)
+            if changed:commit(data)
+        except Exception:
+            INDEX=None;raise
 
 def status(url,mapping,archive):
-    entry=load(FILE,{}).get(normalized(url),{});resources=entry.get('resources',[url]);missing=[]
+    with LOCK:entry=state()['data'].get(normalized(url),{})
+    resources=entry.get('resources',[url]);missing=[]
     for value in resources:
         p=urlsplit(value)
         row=None;target=value
@@ -70,7 +119,8 @@ def status(url,mapping,archive):
 def discover(url,data,content_type):
     """Track declared page/style dependencies even when iframe embedding is refused."""
     if 'text/html' not in content_type and 'text/css' not in content_type:return
-    if not any(url in entry.get('resources',[]) for entry in load(FILE,{}).values()):return
+    with LOCK:
+        if normalized(url) not in state()['owners']:return
     text=data.decode('utf-8',errors='replace');links=[]
     if 'text/html' in content_type:
         from html.parser import HTMLParser
@@ -83,5 +133,4 @@ def discover(url,data,content_type):
     if 'text/css' in content_type:
         links.extend(m[1].strip('"\' ') for m in re.finditer(r'url\(\s*([^)]*)\)',text))
         links.extend(re.findall(r'@import\s+["\']([^"\']+)',text))
-    for value in links:
-        if value and not value.startswith(('#','data:','blob:')):associate(urljoin(url,value),url)
+    associate_many((urljoin(url,value),url) for value in links if value and not value.startswith(('#','data:','blob:')))

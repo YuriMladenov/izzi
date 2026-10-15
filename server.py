@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-import html,json,mimetypes,re,time,hashlib
+import html,json,mimetypes,re,time,hashlib,gzip
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from pathlib import Path
 from html.parser import HTMLParser
@@ -14,6 +14,7 @@ import book_covers
 import operations
 import archive_db
 import replay_cache
+import geogebra_runtime
 from archive_state import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
@@ -21,11 +22,13 @@ DOC_EXT={".exe",".sb",".sb2",".sb3",".csv",".pdf",".doc",".docx",".xls",".xlsx",
 MEDIA_EXT={".mp3",".wav",".ogg",".m4a",".mp4",".webm",".mov"}
 IMAGE_EXT={".jpg",".jpeg",".png",".gif",".svg",".webp"}
 FONT_EXT={".woff",".woff2",".ttf",".otf",".eot"}
+DOC_EXT|={'.ggb'}
 FILE_EXT=DOC_EXT|MEDIA_EXT|IMAGE_EXT
 
 
 # v3.4: explicit MIME types important for Firefox offline replay.
 MIME_OVERRIDES={
+    '.ggb':'application/vnd.geogebra.file',
     ".woff2":"font/woff2",".woff":"font/woff",".ttf":"font/ttf",".otf":"font/otf",
     ".svg":"image/svg+xml",".js":"application/javascript",".mjs":"application/javascript",
     ".css":"text/css",".json":"application/json",".mp4":"video/mp4",".webm":"video/webm",
@@ -321,7 +324,7 @@ def current_missing(events,mapping):
         if key in seen:continue
         seen.add(key);ext=Path(path).suffix.lower()
         row=find(mapping,host,path,query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
-        if row or bundled_font(host,path):resolved+=1;continue
+        if row or bundled_font(host,path) or geogebra_runtime.asset(host,path):resolved+=1;continue
         old=find(mapping,host,path,query)
         category='UPSTREAM 404 WARNING' if old and old.get('status')==404 else (
             'OPTIONAL' if ext=='.map' or path in ('/favicon.ico','/datastore/favicon.ico') else 'MISSING')
@@ -342,31 +345,53 @@ def missing_log():return STATE_DIR/"missing_resources.jsonl"
 class H(BaseHTTPRequestHandler):
     protocol_version='HTTP/1.1'
     timeout=15
-    def cache_match(self,etag):
+    def gzip_text(self,ctype):
+        mime=ctype.split(';')[0].strip().lower()
+        if not (mime.startswith('text/') or mime in TEXT):return False
+        offers={}
+        for item in self.headers.get('Accept-Encoding','').lower().split(','):
+            parts=item.strip().split(';');quality=1.
+            for parameter in parts[1:]:
+                if parameter.strip().startswith('q='):
+                    try:quality=float(parameter.strip()[2:])
+                    except ValueError:quality=0.
+            offers[parts[0].strip()]=quality
+        return offers.get('gzip',offers.get('*',0))>0
+
+    def cache_match(self,etag,vary=None):
         candidates=self.headers.get('If-None-Match','').split(',')
         matches=any(value.strip()=='*' or value.strip().removeprefix('W/')==etag for value in candidates)
         if self.command not in ('GET','HEAD') or not matches:return False
         self.send_response(304)
         self.send_header('ETag',etag)
         self.send_header('Cache-Control','private, max-age=0, must-revalidate')
+        if vary:self.send_header('Vary',vary)
         self.end_headers()
         return True
 
-    def send_cached(self,data,ctype,extra=None,etag=None):
+    def send_cached(self,data,ctype,extra=None,etag=None,encoding=None):
+        if encoding is None and len(data)>=1024 and self.gzip_text(ctype):
+            data=gzip.compress(data,compresslevel=3,mtime=0);encoding='gzip';etag=None
         etag=etag or '"'+hashlib.sha256(data).hexdigest()+'"'
-        if self.cache_match(etag):return
+        if self.cache_match(etag,vary='Accept-Encoding'):return
         self.send_response(200)
         self.send_header('Content-Type',ctype)
         self.send_header('Content-Length',str(len(data)))
         self.send_header('ETag',etag)
         self.send_header('Cache-Control','private, max-age=0, must-revalidate')
+        self.send_header('Vary','Accept-Encoding')
+        if encoding=='gzip':self.send_header('Content-Encoding','gzip')
         for key,value in (extra or {}).items():self.send_header(key,value)
         self.end_headers()
         if self.command!='HEAD':self.wfile.write(data)
 
     def sendb(self,b,ct="application/octet-stream",status=200,extra=None):
+        encoded=status==200 and len(b)>=1024 and self.gzip_text(ct)
+        if encoded:b=gzip.compress(b,compresslevel=3,mtime=0)
         self.send_response(status);self.send_header("Content-Type",ct);self.send_header("Content-Length",str(len(b)))
         self.send_header("Cache-Control","no-store")
+        self.send_header('Vary','Accept-Encoding')
+        if encoded:self.send_header('Content-Encoding','gzip')
         for k,v in (extra or {}).items():self.send_header(k,v)
         self.end_headers()
         if self.command!="HEAD":self.wfile.write(b)
@@ -430,6 +455,17 @@ class H(BaseHTTPRequestHandler):
         if not r:
             font=bundled_font(host,path)
             if font:return self.sendfile(font,replay_mime(path))
+            runtime=geogebra_runtime.asset(host,path)
+            if runtime:
+                ct=replay_mime(path,mimetypes.guess_type(path)[0] or 'application/octet-stream')
+                if ct.startswith('text/') or ct in TEXT:
+                    encoding='gzip' if self.gzip_text(ct) else 'identity'
+                    def prepare_runtime():
+                        data=runtime.read_bytes()
+                        return gzip.compress(data,compresslevel=3,mtime=0) if encoding=='gzip' else data
+                    data,etag=replay_cache.prepared(runtime,('geogebra',encoding),prepare_runtime)
+                    return self.send_cached(data,ct,etag=etag,encoding=encoding)
+                return self.sendfile(runtime,ct)
         # Retain real upstream errors when there is no usable body alternative.
         if not r and usable:
             error=find(m,host,path,q,None,book)
@@ -472,8 +508,12 @@ class H(BaseHTTPRequestHandler):
         if static:
             import external_links
             try:
-                data,etag=replay_cache.prepared(f,(host,external_links.hosts()),lambda:rewrite(f.read_bytes(),host,html_document=False))
-                return self.send_cached(data,ct,etag=etag)
+                encoding='gzip' if f.stat().st_size>=1024 and self.gzip_text(ct) else 'identity'
+                def prepare():
+                    data=rewrite(f.read_bytes(),host,html_document=False)
+                    return gzip.compress(data,compresslevel=3,mtime=0) if encoding=='gzip' else data
+                data,etag=replay_cache.prepared(f,(host,external_links.hosts(),encoding),prepare)
+                return self.send_cached(data,ct,etag=etag,encoding=encoding)
             except UnicodeDecodeError:
                 return self.sendb(b'Captured static resource is compressed/corrupt. Recapture it.','text/plain; charset=utf-8',502)
         b=f.read_bytes()
@@ -593,7 +633,7 @@ class H(BaseHTTPRequestHandler):
                 return self.sendb(b'{"available":false}',"application/json",400)
             ext=Path(target.path).suffix.lower()
             record=find(m,target.hostname,target.path,target.query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
-            return self.sendb(json.dumps({'available':bool(record or bundled_font(target.hostname,target.path))}).encode(),'application/json')
+            return self.sendb(json.dumps({'available':bool(record or bundled_font(target.hostname,target.path) or geogebra_runtime.asset(target.hostname,target.path))}).encode(),'application/json')
         if p.path=='/__journal__':
             summary=progress_journal.summarize(PROGRESS_DIR)
             content='<h1>Локален журнал</h1><p>Записани заявки: %d · Невалидни редове: %d</p><p>Журналът пази локални заявки; това не е възстановен прогрес от оригиналния сървър. Тук се показват само броячи.</p>'%(summary['records'],summary['invalid_lines'])

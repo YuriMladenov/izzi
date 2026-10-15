@@ -1,14 +1,15 @@
 import json,time
 from config import STATE_DIR
+from import_har import save
 
 P=STATE_DIR/"active_lesson.json"
 
 def set_active(book=None,lesson=None,url=None):
     P.parent.mkdir(parents=True,exist_ok=True)
-    P.write_text(json.dumps({
+    save(P,{
         "book":book,"lesson":lesson,"url":url,
         "time":time.time()
-    },ensure_ascii=False,indent=2),encoding="utf-8")
+    })
 
 def clear():
     set_active(None,None,None)

@@ -1,5 +1,5 @@
 """Shared URL-map resolution for HTTP replay and archive diagnostics."""
-import re
+import re,zipfile
 from pathlib import Path
 from urllib.parse import urlparse,unquote
 
@@ -50,6 +50,13 @@ def usable_body(r,archive,ext=''):
         with blob.open('rb') as stream:magic=stream.read(4)
         if ext=='.exe' and not magic.startswith(b'MZ'):return False
         if ext in {'.sb3','.sb2'} and not magic.startswith(b'PK'):return False
+    if ext=='.ggb':
+        try:
+            with zipfile.ZipFile(blob) as package:
+                if package.getinfo('geogebra.xml').file_size>8*1024*1024:return False
+                with package.open('geogebra.xml') as stream:
+                    if b'<geogebra' not in stream.read(1024):return False
+        except (OSError,ValueError,KeyError,RuntimeError,NotImplementedError,zipfile.BadZipFile):return False
     return True
 
 def pick(rs,usable=None):
