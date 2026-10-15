@@ -58,6 +58,7 @@ const frame={contentDocument:ready,contentWindow:{location:lesson}};
 const context={URL,URLSearchParams,AbortController,Map,Set,O:lesson.origin,console,clearTimeout(){},setTimeout(fn){queueMicrotask(()=>{ticks++;frame.contentDocument=fresh;if(ticks===2)fresh.readyState='interactive';if(ticks===3)mounted=true;fn();});return 1;}};
 const api=vm.runInNewContext(helper+';({captureLoadLesson,captureStrictChecks})',context);
 await api.captureLoadLesson(frame,lesson);assert.equal(ticks,3,'a same-URL retry must wait for its new document and mounted application');
+const requested=new URL(frame.src);assert.equal(requested.pathname,lesson.pathname);assert(requested.searchParams.get('__izzi_offline_recover'),'every lesson navigation must bypass a previously cached HTML body');assert.equal(lesson.searchParams.has('__izzi_offline_recover'),false,'canonical lesson identity stays unchanged');
 mounted=false;
 let issues=await api.captureStrictChecks(frame,lesson,async()=>{});
 assert.equal(issues.length,1);assert.equal(issues[0].kind,'page','an unmounted lesson must never pass capture');

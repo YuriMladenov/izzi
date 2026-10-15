@@ -1,3 +1,15 @@
+/* Activate only the GeoGebra start controls, never arbitrary lesson buttons. */
+async function captureGeoGebra(frame,lesson){
+const issues=[];
+for(const root of frame.contentDocument.querySelectorAll('[id^="geogebra-"].int')){
+if(root.classList.contains('ggc--loaded')||root.__izziGeoCaptureStarted)continue;
+const button=root.querySelector('.int-overlay > button.cta');
+if(!button||button.disabled)continue;
+try{button.click();root.__izziGeoCaptureStarted=true;await new Promise(resolve=>setTimeout(resolve,300));}
+catch(error){issues.push({kind:'page',url:lesson.href,reason:'GeoGebra не се активира: '+error.message});}
+}
+return issues;
+}
 async function captureLessonImages(frame,lesson,ping,options={}){const doc=frame.contentDocument;if(!doc||frame.contentWindow.location.pathname!==lesson.pathname)throw new Error('Урокът не е достъпен в iframe: '+lesson.pathname);
 const win=frame.contentWindow,scrollRoot=doc.scrollingElement||doc.documentElement;
 const startX=win.scrollX||0,startY=win.scrollY||0;let scrollIncomplete=false;
@@ -16,11 +28,18 @@ const timer=setTimeout(()=>finish(new Error('image timeout')),20000);image.onloa
 const fresh=new URL(url.href);fresh.searchParams.set('__izzi_offline_recover',Date.now().toString(36)+'_'+attempt);image.src=fresh.href;});if(!await status(url))throw new Error('няма годен body в архива');failed.delete(url.href);return;}catch(error){reason=error.message;}}failed.set(url.href,reason);};if(!await status(lesson))throw new Error('HTML на урока не е записан в архива');let checked=new Set(),stable=0;for(let round=0;round<6&&stable<2;round++){discover();
 const pending=[...seen.values()].filter(url=>!checked.has(url.href));stable=pending.length?0:stable+1;let index=0;await Promise.all(Array.from({length:Math.min(4,pending.length)},async()=>{while(index<pending.length){const url=pending[index++];checked.add(url.href);await load(url);}}));await new Promise(resolve=>setTimeout(resolve,1000));}discover();for(const url of seen.values())if(!checked.has(url.href))failed.set(url.href,'появи се след проверката');if(scrollIncomplete){await ping('scroll-incomplete',lesson,{reason:'превъртането не достигна края'});}for(const [url,reason] of failed){console.warn('IZZI IMAGE MISSING',lesson.pathname,url,reason);await ping('image-failed',lesson,{asset:url,reason});}await ping('images-checked',lesson,{total:seen.size,failed:failed.size});return {total:seen.size,failed:failed.size+(scrollIncomplete?1:0),issues:[...[...failed].map(([url,reason])=>({kind:'image',url,reason})),...(scrollIncomplete?[{kind:'page',url:lesson.href,reason:'Превъртането не достигна края'}]:[])]};}
 async function captureLessonFiles(frame,lesson,ping,options={}){const doc=frame.contentDocument,urls=new Map();
-const add=value=>{if(/^\d+\/(?:publication|shared)\//.test(value))value='/datastore/'+value;let url;try{url=new URL(value,doc.baseURI||lesson.href)}catch{return}if(!/^https?:$/.test(url.protocol)||url.username||url.password||!/(^|\.)izzi\.digital$/i.test(url.hostname))return;if(!url.pathname.includes('/files/')&&!/\.(ggb|sb3|sb2|sb|exe|zip|7z|rar|pdf|docx?|xlsx?|pptx?|odt|ods|odp|txt|csv)$/i.test(url.pathname))return;url.hash='';const key=/\.ggb$/i.test(url.pathname)?url.origin+url.pathname.replace(/^\/DOS\/\d+(?=\/datastore\/)/,'')+url.search:url.href;urls.set(key,url);};for(const node of doc.querySelectorAll('a[href],a[download]'))add(node.getAttribute('href'));
+const add=value=>{if(/^\d+\/(?:publication|shared)\//.test(value))value='/datastore/'+value;let url;try{url=new URL(value,doc.baseURI||lesson.href)}catch{return}if(!/^https?:$/.test(url.protocol)||url.username||url.password||!/(^|\.)izzi\.digital$/i.test(url.hostname))return;if(!url.pathname.includes('/files/')&&!/\.(ggb|sb3|sb2|sb|exe|zip|7z|rar|pdf|docx?|xlsx?|pptx?|odt|ods|odp|txt|csv)$/i.test(url.pathname))return;url.hash='';const key=/\.ggb$/i.test(url.pathname)?'izzi'+url.pathname.replace(/^\/DOS\/\d+(?=\/datastore\/)/,'')+url.search:url.href;urls.set(key,url);};for(const node of doc.querySelectorAll('a[href],a[download]'))add(node.getAttribute('href'));
 const area=document.createElement('textarea');area.innerHTML=doc.documentElement.outerHTML;
 const text=area.value.replace(/\\u002[fF]/g,'/').replace(/\\\//g,'/').replace(/\\["']/g,'"');for(const match of text.matchAll(/<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["']/gi))add(match[1]);
 /* Include GeoGebra files inside hidden component configs and clientData. */
-for(const match of text.matchAll(/(?:https?:\/\/[^"'\s<>\\]+|\/\/[^"'\s<>\\]+|\/(?:DOS\/\d+\/)?datastore\/[^"'\s<>\\]+|\.\/datastore\/[^"'\s<>\\]+|\d+\/(?:publication|shared)\/[^"'\s<>\\]+)\.ggb(?:\?[^"'\s<>\\]*)?/gi))add(match[0]);let failed=0;
+for(const match of text.matchAll(/(?:https?:\/\/[^"'\s<>\\]+|\/\/[^"'\s<>\\]+|\/(?:DOS\/\d+\/)?datastore\/[^"'\s<>\\]+|\.\/datastore\/[^"'\s<>\\]+|\d+\/(?:publication|shared)\/[^"'\s<>\\]+)\.ggb(?:\?[^"'\s<>\\]*)?/gi))add(match[0]);
+/* Live component configuration wins over raw clientData resource paths. */
+for(const node of doc.querySelectorAll('geogebra,[id^="geogebra-"].int')){
+let config=node.__vue__?.conf;
+if(!config){try{const raw=node.getAttribute?.('v-bind:config')||node.getAttribute?.(':config');if(raw){area.innerHTML=raw;config=JSON.parse(area.value).config;}}catch{}}
+for(const value of [config?.filename?.path,config?.filename?.src])if(value)add(value);
+}
+let failed=0;
 const issues=[];for(const url of urls.values()){let saved=false,reason='';if(options.skipAvailable){const response=await fetch(O+'/__offline_capture__/image_status?'+new URLSearchParams({url:url.href}),{cache:'no-store'});saved=response.ok&&(await response.json()).available===true;}for(let attempt=0;attempt<2&&!saved;attempt++){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),120000);try{const fresh=new URL(url.href);fresh.searchParams.set('__izzi_offline_recover',Date.now().toString(36)+'_'+attempt);
 const reply=await frame.contentWindow.fetch(fresh.href,{mode:'no-cors',credentials:'include',cache:'no-store',signal:controller.signal});await reply.blob();for(let check=0;check<20&&!saved;check++){const response=await fetch(O+'/__offline_capture__/image_status?'+new URLSearchParams({url:url.href}),{cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error('capture status unavailable');saved=(await response.json()).available===true;if(!saved)await new Promise(resolve=>setTimeout(resolve,500));}if(!saved)throw new Error('няма годен файл в архива');}catch(error){reason=error.message;}finally{clearTimeout(timer)}}if(!saved){failed++;issues.push({kind:'file',url:url.href,reason});await ping('file-failed',lesson,{asset:url.href,reason});console.warn('IZZI FILE MISSING',url.href,reason);}}
 if(/<geogebra\b|block-type=["']geogebra["']|\bggc-holder\b|"template"\s*:\s*"geogebra"/i.test(text)||[...urls.values()].some(url=>/\.ggb$/i.test(url.pathname))){

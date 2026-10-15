@@ -121,16 +121,21 @@ def discover(url,data,content_type):
     if 'text/html' not in content_type and 'text/css' not in content_type:return
     with LOCK:
         if normalized(url) not in state()['owners']:return
-    text=data.decode('utf-8',errors='replace');links=[]
+    text=data.decode('utf-8',errors='replace');links=[];base=url
     if 'text/html' in content_type:
         from html.parser import HTMLParser
         class Dependencies(HTMLParser):
+            base=url;seen_base=False
             def handle_starttag(self,tag,attrs):
                 values=dict(attrs)
+                if tag=='base' and 'href' in values and not self.seen_base:
+                    self.seen_base=True
+                    target=urljoin(url,values['href'] or '')
+                    if valid_url(target):self.base=target
                 if tag in ('script','img','iframe','source','video','audio','embed') and values.get('src'):links.append(values['src'])
                 if tag=='link' and values.get('rel','').lower() in ('stylesheet','preload','modulepreload') and values.get('href'):links.append(values['href'])
-        Dependencies().feed(text)
+        parser=Dependencies();parser.feed(text);base=parser.base
     if 'text/css' in content_type:
         links.extend(m[1].strip('"\' ') for m in re.finditer(r'url\(\s*([^)]*)\)',text))
         links.extend(re.findall(r'@import\s+["\']([^"\']+)',text))
-    associate_many((urljoin(url,value),url) for value in links if value and not value.startswith(('#','data:','blob:')))
+    associate_many((urljoin(base,value),url) for value in links if value and not value.startswith(('#','data:','blob:')))

@@ -75,6 +75,14 @@ async function linkedApps(){
  assert(events.some(e=>e.extra.asset.endsWith('/datastore/notes/explanation.html')));
  assert(events.some(e=>e.extra.asset.endsWith('/pictures/detail.png')));
  assert(body.children.every(e=>e.removed));
+ // A downloadable GeoGebra worksheet must use fetch, not an HTML iframe.
+ const before=body.children.length;
+ frame.contentDocument.baseURI='https://bg.izzi.digital/datastore/blocks/657825/';
+ frame.contentDocument.documentElement.outerHTML='<a href="example.ggb">GeoGebra file</a>';
+ events.length=0;await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}));
+ assert.equal(body.children.length,before);assert(events.some(e=>e.extra.asset==='https://bg.izzi.digital/datastore/blocks/657825/example.ggb'));
+ delete frame.contentDocument.baseURI;
+
  frame.contentDocument.documentElement.outerHTML='<youtube-player video-id="abcdefghijk"></youtube-player>';
  events.length=0;const youtubeResult=await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}));
  assert.equal(youtubeResult.failed,0);assert(events.some(e=>e.kind==='youtube-checked'&&e.extra.asset.endsWith('abcdefghijk')));

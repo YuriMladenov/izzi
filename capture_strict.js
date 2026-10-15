@@ -1,7 +1,9 @@
 /* Strict completion, targeted recovery and visible resource markers. Embedded in the bookmarklet. */
 async function captureLoadLesson(frame,lesson){
 let previous;try{previous=frame.contentDocument;}catch{}
-let loaded=false;frame.onload=()=>{loaded=true;};frame.src=lesson.href;
+/* A deleted archive cannot be repopulated from the browser's memory cache. */
+const fresh=new URL(lesson.href);fresh.searchParams.set('__izzi_offline_recover',Date.now().toString(36)+'_'+Math.random().toString(36).slice(2));
+let loaded=false;frame.onload=()=>{loaded=true;};frame.src=fresh.href;
 for(let attempt=0;attempt<100;attempt++){
 try{
 const doc=frame.contentDocument,win=frame.contentWindow,app=doc?.querySelector?.('.app-main');
@@ -109,6 +111,7 @@ try{
 const doc=frame.contentDocument,app=doc?.querySelector?.('.app-main');
 if(!doc||frame.contentWindow?.location?.pathname!==lesson.pathname||(doc.readyState==='loading')||(app&&!app.classList?.contains('app-main--ready')))return [{kind:'page',url:lesson.href,reason:'Приложението на урока не завърши зареждането. Провери грешките и достъпа в оригиналния сайт.'}];
 }catch(error){return [{kind:'page',url:lesson.href,reason:error.message}];}
+if(typeof captureGeoGebra==='function')issues.push(...await captureGeoGebra(frame,lesson));
 const checks=await Promise.allSettled([captureLessonImages(frame,lesson,ping,{skipAvailable}),captureLessonFiles(frame,lesson,ping,{skipAvailable}),captureLessonMedia(frame,lesson,ping,{skipAvailable})]);
 for(const result of checks){
 if(result.status==='fulfilled')issues.push(...(result.value.issues||[]));

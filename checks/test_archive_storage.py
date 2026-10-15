@@ -202,6 +202,29 @@ class Storage(unittest.TestCase):
         self.assertEqual({'1','9'},set(books));self.assertEqual('Recovered lesson',books['1']['lessons']['5']['title'])
         self.assertEqual('Preserved',books['9']['lessons']['1']['title'])
 
+    def test_deleted_book_can_be_recaptured_with_the_same_html_body(self):
+        import capture_addon,delete_book
+        from mitmproxy import http
+        from types import SimpleNamespace
+        self.write('books.json',{});self.write('url_map.json',{});archive_db.initialize(self.state)
+        self.start_server()
+        body=b'<html><script>var dosData = {"publicationName":"Recaptured book","unitName":"Recaptured lesson"};</script></html>'
+        url='https://bg.izzi.digital/DOS/887348/102104.html'
+        with patch.multiple(capture_addon,ARCHIVE_DIR=self.archive,STATE_DIR=self.state,URL_MAP_FILE=self.state/'url_map.json',BOOKS_FILE=self.state/'books.json'),patch.object(capture_addon,'observe'),patch.object(capture_addon,'note_recovery'),patch.object(capture_addon.external_links,'discover'):
+            def capture(request_url):
+                flow=SimpleNamespace(request=http.Request.make('GET',request_url),response=http.Response.make(200,body,{'Content-Type':'text/html'}))
+                capture_addon.response(flow)
+            capture(url)
+            self.assertIn(b'Recaptured book',self.request('/')[2])
+            delete_book.remove('887348',self.state,self.archive)
+            self.assertNotIn(b'Recaptured book',self.request('/')[2])
+            self.assertNotIn(url,import_har.load(self.state/'url_map.json',{}))
+            capture(url+'?__izzi_offline_recover=fresh-request')
+            self.assertIn(b'Recaptured book',self.request('/')[2])
+            self.assertIn(b'Recaptured lesson',self.request('/__book__/887348')[2])
+            row=import_har.load(self.state/'url_map.json',{})[url][0]
+            self.assertEqual(body,(self.archive/row['key']).read_bytes())
+
     def test_layout_can_resume_after_interrupted_metadata_update(self):
         self.prepare();self.write('extra.json',{'key':self.old})
         plan=migrate_archive.report(self.archive,self.state)

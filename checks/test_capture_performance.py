@@ -29,6 +29,18 @@ class DependencyIndex(unittest.TestCase):
         self.assertEqual(31,len(json.loads(self.file.read_text()) [root]['resources']))
         data=json.loads(self.file.read_text());data['https://new.example.org/']={'resources':[]};save(self.file,data)
         self.assertIn('new.example.org',links.hosts())
+    def test_link_dependencies_honor_the_first_html_base(self):
+        root='https://bg.izzi.digital/DOS/888413/datastore/blocks/657825/index.html'
+        links.register(root)
+        links.discover(root,b'<base href="/datastore/blocks/657825/"><base href="/ignored/"><script src="variables.js"></script><link rel="stylesheet" href="assets/style.css">','text/html')
+        data=json.loads(self.file.read_text())[root]['resources']
+        self.assertIn('https://bg.izzi.digital/datastore/blocks/657825/variables.js',data)
+        self.assertIn('https://bg.izzi.digital/datastore/blocks/657825/assets/style.css',data)
+        self.assertNotIn('https://bg.izzi.digital/DOS/888413/datastore/blocks/657825/variables.js',data)
+        links.discover('https://bg.izzi.digital/datastore/blocks/657825/assets/style.css',b'body{background:url(../images/loading-icon.gif)}','text/css')
+        data=json.loads(self.file.read_text())[root]['resources']
+        self.assertIn('https://bg.izzi.digital/datastore/blocks/657825/images/loading-icon.gif',data)
+
     def test_platform_home_does_not_attach_unrelated_catalog(self):
         root='https://bg.izzi.digital/explanation.html'
         links.register(root)
