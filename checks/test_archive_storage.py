@@ -163,6 +163,45 @@ class Storage(unittest.TestCase):
         self.assertEqual(4,len(Path(mapping[flow.request.pretty_url][0]['key']).parts))
         self.assertIn('5',import_har.load(self.state/'books.json',{})['1']['lessons'])
 
+    def test_live_capture_registers_complete_lessons_and_refreshes_home(self):
+        import capture_addon
+        from mitmproxy import http
+        from types import SimpleNamespace
+        self.write('books.json',{});self.write('url_map.json',{});archive_db.initialize(self.state)
+        self.start_server()
+        self.assertIn('Библиотеката е празна'.encode(),self.request('/')[2])
+        with patch.multiple(capture_addon,ARCHIVE_DIR=self.archive,STATE_DIR=self.state,URL_MAP_FILE=self.state/'url_map.json',BOOKS_FILE=self.state/'books.json'),patch.object(capture_addon,'observe'),patch.object(capture_addon.external_links,'discover'):
+            for book,status,full in [('2001',200,True),('2061',206,True),('2062',206,False)]:
+                body=('<html><script>var dosData = '+json.dumps({'publicationName':'Live Book '+book,'unitName':'Lesson one'})+';</script></html>').encode()
+                headers={'Content-Type':'text/html'}
+                if status==206:headers['Content-Range']='bytes 0-%d/%d'%(len(body)-1,len(body) if full else len(body)+100)
+                url='https://bg.izzi.digital/DOS/'+book+'/5.html'
+                flow=SimpleNamespace(request=http.Request.make('GET',url),response=http.Response.make(status,body,headers))
+                capture_addon.response(flow)
+                home=self.request('/')[2]
+                if full:
+                    self.assertIn(('Live Book '+book).encode(),home)
+                    self.assertIn(b'Lesson one',self.request('/__book__/'+book)[2])
+                else:self.assertNotIn(('Live Book '+book).encode(),home)
+        self.assertEqual({'2001','2061'},set(import_har.load(self.state/'books.json',{})))
+
+    def test_repair_restores_complete_html_without_registering_partial_or_error(self):
+        import repair_library
+        self.write('books.json',{'9':{'id':'9','title':'Keep existing','lessons':{'1':{'id':'1','title':'Preserved'}}}})
+        body=b'<html><title>Recovered lesson</title></html>'
+        key=blob_key(hashlib.sha256(body).hexdigest(),'.html');file=self.archive/key;file.parent.mkdir(parents=True);file.write_bytes(body)
+        complete=dict(key=key,status=206,method='GET',size=len(body),body_available=True,content_range='bytes 0-%d/%d'%(len(body)-1,len(body)))
+        partial={**complete,'content_range':'bytes 0-%d/%d'%(len(body)-1,len(body)+100)}
+        self.write('url_map.json',{'https://bg.izzi.digital/DOS/1/5.html':[complete,{**complete,'status':404}],
+            'https://bg.izzi.digital/DOS/2/6.html':[partial],
+            'https://bg.izzi.digital/DOS/3/7.html':[{**complete,'status':404}]})
+        archive_db.initialize(self.state)
+        with patch.multiple(repair_library,ARCHIVE_DIR=self.archive,BOOKS_FILE=self.state/'books.json',URL_MAP_FILE=self.state/'url_map.json'):
+            repair_library.main()
+        books=import_har.load(self.state/'books.json',{})
+        self.assertEqual({'1','9'},set(books));self.assertEqual('Recovered lesson',books['1']['lessons']['5']['title'])
+        self.assertEqual('Preserved',books['9']['lessons']['1']['title'])
+
     def test_layout_can_resume_after_interrupted_metadata_update(self):
         self.prepare();self.write('extra.json',{'key':self.old})
         plan=migrate_archive.report(self.archive,self.state)

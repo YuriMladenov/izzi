@@ -3,6 +3,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from config import *
 from import_har import load,save,metadata
+from replay_resolver import pick,usable_body
 
 RX=re.compile(r"^/DOS/(\d+)/(\d+)\.html$")
 
@@ -16,9 +17,8 @@ def main():
         if p.netloc!=SOURCE_HOST:continue
         m=RX.match(p.path)
         if not m:continue
-        usable=[r for r in records if r.get("body_available") and r.get("key")]
-        if not usable:continue
-        r=usable[-1]
+        r=pick(records,lambda row:row.get('method','GET')=='GET' and usable_body(row,ARCHIVE_DIR,'.html'))
+        if not r:continue
         f=ARCHIVE_DIR/r["key"]
         if not f.exists():continue
         bid,lid=m.groups()

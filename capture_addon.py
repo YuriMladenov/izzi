@@ -11,7 +11,7 @@ from media_mapping import add_media
 from capture_session import event
 from capture_observed import observe
 from active_lesson import set_active, clear as clear_active
-from replay_resolver import find,usable_body
+from replay_resolver import find,usable_body,complete_range
 from cache_bust_recovery import canonical_url,is_recovery_url,note as note_recovery
 
 import external_links
@@ -283,7 +283,9 @@ def _response(flow):
 
     if p.netloc==SOURCE_HOST and flow.request.method=="GET":
         m=RX.match(p.path)
-        if m and status==200 and data:
+        # A 206 may contain the entire HTML document. Partial ranges must not
+        # create catalogue entries, but complete ones are valid replay lessons.
+        if m and data and (status==200 or status==206 and complete_range(rec,len(data))):
             bid,lid=m.groups();bt,lt=metadata(data,bid,lid)
             def update_book(b):
                 if bt:b["title"]=bt
