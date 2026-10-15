@@ -16,6 +16,35 @@ class ReplayHTML(unittest.TestCase):
         with patch.object(server,'lesson_media',return_value=media or []):
             return server.inject_media_map(text.encode(),path).decode()
 
+    def test_listen_button_pauses_and_resumes_resolved_audio_url(self):
+        # Original alt-audio method: assigning src resets playback to zero.
+        method='''function(){var t=this.altAudio;1==dosData.isExport&&(t=this.altAudio.substring(1)),this.$player.duration>0&&!this.$player.paused&&this.$player.src.indexOf(t)>-1?(this.$player.pause(),this.isPlaying=!1):this.$player.duration>0&&this.$player.paused&&this.$player.src.indexOf(t)>-1?(this.$player.play(),this.isPlaying=!0,Ct.$emit("pause-others",{active:this._uid})):(this.$player.src=this.altAudio,this.$player.play(),this.isPlaying=!0,Ct.$emit("pause-others",{active:this._uid}))}'''
+        script='const component={name:"alt-audio",playerId:"global-audio-player",play:'+method+'};'
+        rewritten=server.rewrite(script.encode(),html_document=False).decode()
+        self.assertNotEqual(script,rewritten)
+        self.assertEqual(rewritten,server.rewrite(rewritten.encode(),html_document=False).decode())
+        if not shutil.which('node'):self.skipTest('Node required for audio toggle regression')
+        harness=r'''
+const assert=require('assert');
+const document={baseURI:'http://127.0.0.1:8765/DOS/42888/42929.html'};
+const dosData={isExport:false},Ct={$emit(){}};
+REWRITTEN
+let assignments=0;
+const audio={paused:true,duration:0,currentTime:0,_src:'',
+ get src(){return this._src},set src(value){this._src=new URL(value,document.baseURI).href;this.currentTime=0;assignments++},
+ play(){this.paused=false},pause(){this.paused=true}};
+const vm={$player:audio,altAudio:'./datastore/15/publication/42888/audio/песен.mp3?v=1',_uid:1};
+component.play.call(vm);assert.equal(audio.paused,false);assert.equal(assignments,1);
+audio.currentTime=7;
+component.play.call(vm);assert.equal(audio.paused,true);assert.equal(audio.currentTime,7);assert.equal(vm.isPlaying,false);
+component.play.call(vm);assert.equal(audio.paused,false);assert.equal(audio.currentTime,7);assert.equal(assignments,1);
+// An absolute, already encoded alias still identifies the same song.
+vm.altAudio=audio.src;audio.duration=30;component.play.call(vm);assert.equal(audio.paused,true);assert.equal(assignments,1);
+vm.altAudio='./datastore/other.mp3';component.play.call(vm);assert.equal(assignments,2);assert.equal(audio.currentTime,0);assert.equal(audio.paused,false);
+'''.replace('REWRITTEN',rewritten)
+        result=subprocess.run(['node','-e',harness],capture_output=True,text=True,timeout=15)
+        self.assertEqual(0,result.returncode,result.stderr)
+
     def test_placeholder_removed_before_media_parsing(self):
         t=self.render('<html><head></head><body><video src="#"><source src="1408788.html#"></video></body></html>',
                       [{'url':'https://bg.izzi.digital/video.mp4','strict':True}])

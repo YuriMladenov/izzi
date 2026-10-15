@@ -89,6 +89,11 @@ def rewrite(b,host=None,html_document=None):
            ("https:\\/\\/xapi.izzi.digital\\/","\\/__host__\\/xapi.izzi.digital\\/"),
            ("https://www.googletagmanager.com/gtm.js","/__offline__/gtag.js"))
     for a,c in pairs:t=t.replace(a,c)
+    if 'global-audio-player' in t and 'name:"alt-audio"' in t:
+        # The browser resolves ./ and percent-encodes Cyrillic media URLs.
+        # Compare resolved URLs, and allow pausing before metadata has loaded.
+        t=re.sub(r'this\.\$player\.duration>0&&(!?)this\.\$player\.paused&&this\.\$player\.src\.indexOf\(([$A-Za-z_][$\w]*)\)>-1',
+                 lambda m:m[1]+'this.$player.paused&&(new URL(this.$player.src,document.baseURI).href===new URL('+m[2]+',document.baseURI).href)',t)
     if 'youtu' in t.lower():
         # External YouTube playback is unavailable offline. Keep its API loader
         # local without simulating player events or fetching third-party cookies.
