@@ -625,6 +625,19 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertEqual(self.request(path,headers={'Range':'bytes=2-5','If-Range':'"old-version"'})[2],data)
         self.assertEqual(self.request(path,headers={'If-None-Match':tag})[0],304)
 
+    def test_mathlive_sound_fallback_replays_ranges_for_all_books(self):
+        import bundled_assets
+        self.write('books.json',{});self.write('url_map.json',{});self.start_server()
+        for book in ('887348','777'):
+            path='/DOS/'+book+'/components/js/sounds/plonk.wav'
+            expected=bundled_assets.asset('bg.izzi.digital',path).read_bytes()
+            self.assertTrue(expected.startswith(b'RIFF'))
+            status,headers,body=self.request(path)
+            self.assertEqual(200,status);self.assertEqual('audio/wav',headers['Content-Type']);self.assertEqual(expected,body)
+            status,headers,body=self.request(path,headers={'Range':'bytes=0-11'})
+            self.assertEqual(206,status);self.assertEqual(expected[:12],body)
+        self.assertEqual(404,self.request('/DOS/777/components/js/sounds/unknown.wav')[0])
+
     def test_cleanup_preserves_shared_files_and_incomplete_parts_and_restores(self):
         import archive_cleanup,time
         clock=patch.object(archive_cleanup,'now',return_value=time.time()+600);clock.start();self.patches.append(clock)

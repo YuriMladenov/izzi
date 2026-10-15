@@ -65,6 +65,30 @@ class Completion(unittest.TestCase):
         self.assertFalse(result['available']);self.assertEqual(url,result['missing'][0]['url'])
         self.add(url,b'\x00\x00\x00\x18ftyp'+b'0'*92)
         self.assertTrue(completion.status(self.lesson,[url],self.mapping,self.archive)['available'])
+    def test_bundled_fonts_and_mathlive_sound_work_in_capture_for_all_books(self):
+        import bundled_assets
+        paths=['components/fonts/KaTeX_'+name+'.woff' for name in ('AMS-Regular','Main-Regular','Math-Italic')]+['components/js/sounds/plonk.wav']
+        for book in ('887348','777'):
+            for path in paths:
+                url='https://bg.izzi.digital/DOS/'+book+'/'+path
+                self.add(url,b'<html>origin missing</html>',404)
+                flow=SimpleNamespace(id=url,metadata={},request=http.Request.make('GET',url,headers={'Referer':self.lesson}),response=None)
+                with patch.object(capture_addon,'load_json',return_value=self.mapping),patch.object(capture_addon,'ARCHIVE_DIR',self.archive),patch.object(capture_addon,'update_entry') as update:
+                    capture_addon.request(flow)
+                    self.assertEqual(200,flow.response.status_code)
+                    self.assertEqual(bundled_assets.asset('bg.izzi.digital','/DOS/'+book+'/'+path).read_bytes(),flow.response.content)
+                    capture_addon.response(flow);update.assert_not_called()
+                    status=SimpleNamespace(request=http.Request.make('GET','https://bg.izzi.digital/__offline_capture__/image_status?url='+url),response=None)
+                    capture_addon.request(status)
+                    self.assertTrue(json.loads(status.response.content)['available'])
+                self.assertEqual(404,self.mapping[url][0]['status'])
+        self.settled()
+        self.assertTrue(completion.status(self.lesson,list(self.mapping),self.mapping,self.archive)['available'])
+        missing='https://bg.izzi.digital/DOS/777/components/fonts/KaTeX_Unknown.woff'
+        self.assertFalse(completion.status(self.lesson,[missing],self.mapping,self.archive)['available'])
+        self.assertIsNone(bundled_assets.asset('outside.example','/DOS/777/components/js/sounds/plonk.wav'))
+        self.assertIsNone(bundled_assets.asset('bg.izzi.digital','/DOS/777/components/js/sounds/../plonk.wav'))
+
     def test_post_background_requests_old_lesson_and_analytics_are_excluded(self):
         self.assertFalse(completion.watch('https://bg.izzi.digital/api/sync','POST',self.lesson,'write'))
         self.assertFalse(completion.watch('https://api.izzi.digital/api/data','GET','https://bg.izzi.digital/DOS/2/9.html','other'))

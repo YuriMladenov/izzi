@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 from replay_resolver import find,pick,usable_body,_izzi_host
 from cache_bust_recovery import canonical_url
 import geogebra_runtime
+import bundled_assets
 LOCK=threading.RLock()
 CURRENT=None
 LIMIT=2000
@@ -47,7 +48,7 @@ def status(lesson,assets,mapping,archive):
         p=urlsplit(url);ext=Path(p.path).suffix.lower()
         records=mapping.get(url,[])
         row=pick(records,lambda r:usable_body(r,archive,ext)) if p.path.startswith('/api/') else find(mapping,p.hostname,p.path,p.query,lambda r:usable_body(r,archive,ext))
-        if row or geogebra_runtime.asset(p.hostname,p.path) or any(r.get('method','GET')=='GET' and r.get('status')==204 for r in records):continue
+        if row or bundled_assets.asset(p.hostname,p.path) or geogebra_runtime.asset(p.hostname,p.path) or any(r.get('method','GET')=='GET' and r.get('status')==204 for r in records):continue
         statuses=[r.get('status') for r in records if r.get('method','GET')=='GET']
         code=statuses[-1] if statuses else None
         reason=('HTTP '+str(code)+' от оригиналния сайт') if isinstance(code,int) and code>=400 else 'Няма потвърден годен файл в архива'

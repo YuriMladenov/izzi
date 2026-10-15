@@ -15,6 +15,8 @@ import operations
 import archive_db
 import replay_cache
 import geogebra_runtime
+import bundled_assets
+from bundled_assets import bundled_font
 from archive_state import load as load_archive_state
 
 TEXT={"application/javascript","application/x-javascript","application/json","application/xml","image/svg+xml"}
@@ -32,7 +34,7 @@ MIME_OVERRIDES={
     ".woff2":"font/woff2",".woff":"font/woff",".ttf":"font/ttf",".otf":"font/otf",
     ".svg":"image/svg+xml",".js":"application/javascript",".mjs":"application/javascript",
     ".css":"text/css",".json":"application/json",".mp4":"video/mp4",".webm":"video/webm",
-    ".mp3":"audio/mpeg",".ogg":"audio/ogg",".wasm":"application/wasm",
+    ".mp3":"audio/mpeg",".wav":"audio/wav",".ogg":"audio/ogg",".wasm":"application/wasm",
 }
 def replay_mime(url, recorded=""):
     from urllib.parse import urlparse
@@ -52,23 +54,6 @@ def usable_font(r):
 def usable_image(r):
     return usable_body(r,ARCHIVE_DIR,'.png')
 
-def bundled_font(host,path):
-    if not _izzi_host(host):return None
-    base=Path(__file__).with_name('vendor')
-    patterns=(
-        (r'(?:/DOS/\d+)?/(?:components|profil/dist/common/katex)/fonts/(KaTeX_[A-Za-z0-9-]+\.woff2?)','katex/dist/fonts'),
-        (r'(?:/DOS/\d+)?/profil/dist/izzi/fonts/IBMPlexSans/(IBMPlexSans-(?:Regular|Italic|Medium|MediumItalic|Bold|BoldItalic)\.woff2?)','ibm-plex-sans'),
-        (r'(?:/DOS/\d+)?/profil/dist/common/icons/material/(MaterialIcons(?:-Regular)?\.woff2?)','material-icons'),
-        (r'(?:/DOS/\d+)?/datastore/blocks/\d+/assets/fonts/Open_Sans/(OpenSans-(?:Regular|Italic|Light|LightItalic|Bold|BoldItalic)\.woff2?)','open-sans'),
-    )
-    for pattern,folder in patterns:
-        match=re.fullmatch(pattern,path)
-        if not match:continue
-        name=match[1]
-        if folder=='material-icons':name=name.replace('MaterialIcons.','MaterialIcons-Regular.')
-        font=base/folder/name
-        return font if font.is_file() else None
-    return None
 
 def rewrite(b,host=None,html_document=None):
     # Called ONLY for already-decoded textual resources.
@@ -329,7 +314,7 @@ def current_missing(events,mapping):
         if key in seen:continue
         seen.add(key);ext=Path(path).suffix.lower()
         row=find(mapping,host,path,query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
-        if row or bundled_font(host,path) or geogebra_runtime.asset(host,path):resolved+=1;continue
+        if row or bundled_assets.asset(host,path) or geogebra_runtime.asset(host,path):resolved+=1;continue
         old=find(mapping,host,path,query)
         category='UPSTREAM 404 WARNING' if old and old.get('status')==404 else (
             'OPTIONAL' if ext=='.map' or path in ('/favicon.ico','/datastore/favicon.ico') else 'MISSING')
@@ -458,8 +443,8 @@ class H(BaseHTTPRequestHandler):
         usable=lambda r:usable_body(r,ARCHIVE_DIR,ext)
         r=find(m,host,path,q,usable,book)
         if not r:
-            font=bundled_font(host,path)
-            if font:return self.sendfile(font,replay_mime(path))
+            font=bundled_assets.asset(host,path)
+            if font:return self.sendfile(font,replay_mime(path,'audio/wav' if ext=='.wav' else ''))
             runtime=geogebra_runtime.asset(host,path)
             if runtime:
                 ct=replay_mime(path,mimetypes.guess_type(path)[0] or 'application/octet-stream')
@@ -638,7 +623,7 @@ class H(BaseHTTPRequestHandler):
                 return self.sendb(b'{"available":false}',"application/json",400)
             ext=Path(target.path).suffix.lower()
             record=find(m,target.hostname,target.path,target.query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
-            return self.sendb(json.dumps({'available':bool(record or bundled_font(target.hostname,target.path) or geogebra_runtime.asset(target.hostname,target.path))}).encode(),'application/json')
+            return self.sendb(json.dumps({'available':bool(record or bundled_assets.asset(target.hostname,target.path) or geogebra_runtime.asset(target.hostname,target.path))}).encode(),'application/json')
         if p.path=='/__journal__':
             summary=progress_journal.summarize(PROGRESS_DIR)
             content='<h1>Локален журнал</h1><p>Записани заявки: %d · Невалидни редове: %d</p><p>Журналът пази локални заявки; това не е възстановен прогрес от оригиналния сървър. Тук се показват само броячи.</p>'%(summary['records'],summary['invalid_lines'])

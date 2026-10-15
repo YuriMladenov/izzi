@@ -18,6 +18,7 @@ import external_links
 import capture_completion
 import archive_db
 import geogebra_runtime
+import bundled_assets
 from archive_storage import blob_key
 
 def running():
@@ -55,7 +56,7 @@ def request(flow:http.HTTPFlow):
     try:asyncio.get_running_loop()
     except RuntimeError:return request_sync(flow)
     p=urlparse(flow.request.pretty_url)
-    if (p.hostname==SOURCE_HOST and p.path.startswith('/__offline_capture__/')) or flow.request.headers.get('X-IZZI-Resume') or MISSING_ONLY or '/GeoGebra/HTML5/' in p.path:
+    if (p.hostname==SOURCE_HOST and p.path.startswith('/__offline_capture__/')) or flow.request.headers.get('X-IZZI-Resume') or MISSING_ONLY or '/GeoGebra/HTML5/' in p.path or '/fonts/' in p.path or '/sounds/' in p.path:
         return dispatch('control',request_sync,flow)
     return request_sync(flow)
 
@@ -117,7 +118,7 @@ def _request(flow):
             ext=Path(target.path).suffix.lower()
             row=find(mapping,target.hostname or '',target.path,target.query,
                      lambda r:usable_body(r,ARCHIVE_DIR,ext)) if allowed(target.hostname) else None
-            body=json.dumps({'capture':True,'available':bool(row or geogebra_runtime.asset(target.hostname,target.path))}).encode()
+            body=json.dumps({'capture':True,'available':bool(row or bundled_assets.asset(target.hostname,target.path) or geogebra_runtime.asset(target.hostname,target.path))}).encode()
             flow.response=http.Response.make(200,body,{'Content-Type':'application/json','Cache-Control':'no-store'})
         except (OSError,ValueError):
             flow.response=http.Response.make(503,b'{"capture":true,"available":false}',{'Content-Type':'application/json'})
@@ -161,9 +162,9 @@ def _request(flow):
         return
 
     capture_completion.watch(flow.request.pretty_url,flow.request.method,flow.request.headers.get('referer',''),getattr(flow,'id',id(flow)))
-    runtime=geogebra_runtime.asset(p.hostname,p.path) if flow.request.method=='GET' else None
+    runtime=(bundled_assets.asset(p.hostname,p.path) or geogebra_runtime.asset(p.hostname,p.path)) if flow.request.method=='GET' else None
     if runtime and not find(load_json(URL_MAP_FILE,{}),p.hostname,p.path,p.query,lambda row:usable_body(row,ARCHIVE_DIR,Path(p.path).suffix.lower())):
-        ct=mimetypes.guess_type(p.path)[0] or 'application/octet-stream'
+        ct='audio/wav' if p.path.lower().endswith('.wav') else mimetypes.guess_type(p.path)[0] or 'application/octet-stream'
         flow.response=http.Response.make(200,runtime.read_bytes(),{'Content-Type':ct,'Cache-Control':'no-store','X-IZZI-Archive':'1'})
         return
 
