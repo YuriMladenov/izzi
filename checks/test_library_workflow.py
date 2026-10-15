@@ -454,6 +454,35 @@ class LibraryWorkflow(unittest.TestCase):
         with patch.object(operations.sys,'executable',str(self.root/'absent/python.exe')), patch.object(operations.sysconfig,'get_path',return_value=str(self.root/'absent/Scripts')), patch.object(operations.shutil,'which',return_value=None):
             with self.assertRaisesRegex(ValueError,'рестартирай библиотеката'):operations.find_mitmdump()
 
+    def test_api_block_files_repair_historical_bg_misses_and_replay(self):
+        import external_links,capture_completion
+        api='https://api.izzi.digital/datastore/blocks/657825/'
+        legacy='https://bg.izzi.digital/DOS/888413/datastore/blocks/657825/'
+        page=b'<html><script src="GeoGebra/deployggb.js"></script><script src="jquery-3.2.1.min.js"></script><script src="variables.js"></script><script src="assets/scripts.js"></script><link rel="stylesheet" href="assets/style.css"><img src="images/loading-icon.gif"></html>'
+        files={'GeoGebra/deployggb.js':(b'window.loader=true;','application/javascript'),
+               'jquery-3.2.1.min.js':(b'window.fixtureJquery=true;','application/javascript'),
+               'variables.js':(b'window.fixtureVariables=true;','application/javascript'),
+               'assets/scripts.js':(b'window.fixtureApp=true;','application/javascript'),
+               'assets/style.css':(b'body{color:navy}','text/css'),
+               'images/loading-icon.gif':(base64.b64decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'),'image/gif')}
+        self.add(legacy+'index.html',page)
+        for path in files:self.add(legacy+path,b'<html>origin missing</html>',status=404)
+        with patch.object(external_links,'FILE',self.state/'lesson_links.json'),patch.object(capture_completion,'CURRENT',None):
+            external_links.register(legacy+'index.html');external_links.discover(legacy+'index.html',page,'text/html')
+            self.assertFalse(external_links.status(legacy+'index.html',self.mapping,self.archive)['available'])
+            external_links.register(api+'index.html');self.add(api+'index.html',page)
+            external_links.discover(api+'index.html',page,'text/html')
+            for path,(body,mime) in files.items():self.add(api+path,body,content_type=mime)
+            for root in (api,legacy):self.assertTrue(external_links.status(root+'index.html',self.mapping,self.archive)['available'])
+            lesson='https://bg.izzi.digital/DOS/888413/888428.html';self.add(lesson,b'<html>lesson</html>')
+            capture_completion.start(lesson);capture_completion.CURRENT['activity']-=2
+            self.assertTrue(capture_completion.status(lesson,[legacy+path for path in files],self.mapping,self.archive)['available'])
+            self.start_server()
+            for path,(expected,mime) in files.items():
+                status,headers,body=self.request('/DOS/888413/datastore/blocks/657825/'+path)
+                self.assertEqual(200,status);self.assertEqual(expected,body)
+                self.assertEqual(404,self.mapping[legacy+path][0]['status'])
+
     def test_link_dependencies_and_external_replay(self):
         import external_links
         with patch.object(external_links,'FILE',self.state/'lesson_links.json'):

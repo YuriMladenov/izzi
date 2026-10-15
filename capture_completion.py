@@ -21,11 +21,20 @@ def start(lesson):
     if not valid(lesson):return
     with LOCK:CURRENT={'lesson':canonical_url(lesson),'urls':set(),'pending':{},'activity':time.monotonic(),'truncated':False}
 
+def expect(url,lesson):
+    """A declared linked app may send only an origin Referer across hosts."""
+    if not valid(url) or not valid(lesson):return False
+    url=canonical_url(url)
+    with LOCK:
+        if not CURRENT or CURRENT['lesson']!=canonical_url(lesson):return False
+        if len(CURRENT['urls'])>=LIMIT and url not in CURRENT['urls']:CURRENT['truncated']=True;return False
+        CURRENT['urls'].add(url);CURRENT['activity']=time.monotonic();return True
+
 def watch(url,method,referer,identifier):
     if method!='GET' or not valid(url):return False
     url=canonical_url(url);referer=canonical_url(referer) if referer else ''
     with LOCK:
-        if not CURRENT or (url!=CURRENT['lesson'] and referer!=CURRENT['lesson'] and referer not in CURRENT['urls']):return False
+        if not CURRENT or (url!=CURRENT['lesson'] and url not in CURRENT['urls'] and referer!=CURRENT['lesson'] and referer not in CURRENT['urls']):return False
         if len(CURRENT['urls'])>=LIMIT and url not in CURRENT['urls']:CURRENT['truncated']=True;return False
         CURRENT['urls'].add(url);CURRENT['pending'][identifier]=url;CURRENT['activity']=time.monotonic();return True
 

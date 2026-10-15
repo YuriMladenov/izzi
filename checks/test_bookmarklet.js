@@ -61,26 +61,42 @@ async function navigation(){
 async function linkedApps(){
  const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_links.js'),'utf8');
  assert.equal(source.split('/*IZZI_LINKS_START*/')[1].split('/*IZZI_LINKS_END*/')[0],helper.split(/\r?\n/).join(''));
- const body=new Element('body'),events=[];
- class Frame extends Element{set src(value){this.contentDocument=null;queueMicrotask(()=>this.onload());}}
- const capture=vm.runInNewContext(helper+';captureLessonLinks',{URL,URLSearchParams,Map,AbortController,O:'https://bg.izzi.digital',console:{warn:()=>{}},document:{body,createElement:tag=>tag==='iframe'?new Frame(tag):new Element(tag)},fetch:async()=>({ok:true,json:async()=>({available:true,total:3})}),setTimeout:(f,ms)=>{if(ms!==30000)queueMicrotask(f);return 1;},clearTimeout:()=>{}});
+ const body=new Element('body'),events=[],requests=[],navigated=[];let exactAvailable=true,bgAvailable=true;
+ class Frame extends Element{set src(value){navigated.push(value);this.contentDocument=null;queueMicrotask(()=>this.onload());}}
+ const capture=vm.runInNewContext(helper+';captureLessonLinks',{URL,URLSearchParams,Map,AbortController,O:'https://bg.izzi.digital',console:{warn:()=>{}},document:{body,createElement:tag=>tag==='iframe'?new Frame(tag):new Element(tag)},fetch:async url=>{requests.push(new URL(url));return {ok:true,blob:async()=>({}),json:async()=>({available:String(url).includes('exact=1')?(new URL(new URL(url).searchParams.get('url')).hostname==='api.izzi.digital'?exactAvailable:bgAvailable):true,total:3})};},setTimeout:(f,ms)=>{if(ms!==30000)queueMicrotask(f);return 1;},clearTimeout:()=>{}});
  const html='<a href="./9.html">Related lesson</a><a href="./datastore/notes/explanation.html">Explanation</a><a href="https://api.izzi.digital/datastore/15/publication/1/pictures/detail.png">Detail</a><pkc v-bind:config=\'{"src":"./datastore/blocks/123/app.html","text":"<a href=\\"https://resources.example.org/app/index.html\\">Open</a>"}\'></pkc><script src="./not-a-linked-page.js"></script>';
  const frame={contentDocument:{querySelectorAll:()=>[],documentElement:{outerHTML:html}}};
  const result=await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}));
  assert.equal(result.total,4);assert.equal(result.failed,0);
  assert.equal(events.filter(e=>e.kind==='link-register').length,4);
- assert(events.some(e=>e.extra.asset==='https://bg.izzi.digital/DOS/1/datastore/blocks/123/app.html'));
+ assert(events.some(e=>e.extra.asset==='https://api.izzi.digital/datastore/blocks/123/app.html'));
  assert(events.some(e=>e.extra.asset==='https://resources.example.org/app/index.html'));
  assert(!events.some(e=>e.extra.asset==='https://bg.izzi.digital/DOS/1/9.html'));
  assert(events.some(e=>e.extra.asset.endsWith('/datastore/notes/explanation.html')));
  assert(events.some(e=>e.extra.asset.endsWith('/pictures/detail.png')));
  assert(body.children.every(e=>e.removed));
+ assert(navigated.includes('https://api.izzi.digital/datastore/blocks/123/app.html'));
+ assert(requests.some(url=>url.hostname==='api.izzi.digital'&&url.searchParams.has('__izzi_offline_recover')));
+ assert(requests.some(url=>url.pathname==='/__offline_capture__/image_status'&&url.searchParams.get('exact')==='1'));
+ // A real API failure cannot be masked by an already captured bg HTML alias.
+ frame.contentDocument.documentElement.outerHTML='<a href="./datastore/blocks/657825/index.html">Application</a>';
+ exactAvailable=false;bgAvailable=false;const beforeFailed=navigated.length;
+ let failure=await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async()=>{});
+ assert.equal(failure.failed,1);assert(failure.issues[0].reason.includes('HTML'));assert.equal(navigated.length,beforeFailed);
+
+ bgAvailable=true;events.length=0;
+ const fallback=await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}));
+ assert.equal(fallback.failed,0);assert(events.some(e=>e.kind==='link-checked'&&e.extra.asset==='https://bg.izzi.digital/DOS/1/datastore/blocks/657825/index.html'),'keep a working original app if API is unavailable');
+ exactAvailable=true;events.length=0;
+ failure=await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}),{targets:['https://bg.izzi.digital/DOS/1/datastore/blocks/657825/index.html']});
+ assert.equal(failure.failed,0);assert(events.some(e=>e.kind==='link-checked'&&e.extra.asset==='https://api.izzi.digital/datastore/blocks/657825/index.html'));
+
  // A downloadable GeoGebra worksheet must use fetch, not an HTML iframe.
  const before=body.children.length;
  frame.contentDocument.baseURI='https://bg.izzi.digital/datastore/blocks/657825/';
  frame.contentDocument.documentElement.outerHTML='<a href="example.ggb">GeoGebra file</a>';
  events.length=0;await capture(frame,new URL('https://bg.izzi.digital/DOS/1/8.html'),async(kind,u,extra)=>events.push({kind,extra}));
- assert.equal(body.children.length,before);assert(events.some(e=>e.extra.asset==='https://bg.izzi.digital/datastore/blocks/657825/example.ggb'));
+ assert.equal(body.children.length,before);assert(events.some(e=>e.extra.asset==='https://api.izzi.digital/datastore/blocks/657825/example.ggb'));
  delete frame.contentDocument.baseURI;
 
  frame.contentDocument.documentElement.outerHTML='<youtube-player video-id="abcdefghijk"></youtube-player>';

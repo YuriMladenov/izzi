@@ -11,7 +11,7 @@ from media_mapping import add_media
 from capture_session import event
 from capture_observed import observe
 from active_lesson import set_active, clear as clear_active
-from replay_resolver import find,usable_body,complete_range
+from replay_resolver import find,pick,usable_body,complete_range
 from cache_bust_recovery import canonical_url,is_recovery_url,note as note_recovery
 
 import external_links
@@ -116,9 +116,13 @@ def _request(flow):
         try:
             mapping=load_json(URL_MAP_FILE,{})
             ext=Path(target.path).suffix.lower()
-            row=find(mapping,target.hostname or '',target.path,target.query,
-                     lambda r:usable_body(r,ARCHIVE_DIR,ext)) if allowed(target.hostname) else None
-            body=json.dumps({'capture':True,'available':bool(row or bundled_assets.asset(target.hostname,target.path) or geogebra_runtime.asset(target.hostname,target.path))}).encode()
+            exact=parse_qs(p.query).get('exact')==['1']
+            row=None
+            if allowed(target.hostname):
+                good=lambda r:usable_body(r,ARCHIVE_DIR,ext)
+                row=pick(mapping.get(canonical_url(requested),[]),good) if exact else find(mapping,target.hostname or '',target.path,target.query,good)
+            fallback=not exact and (bundled_assets.asset(target.hostname,target.path) or geogebra_runtime.asset(target.hostname,target.path))
+            body=json.dumps({'capture':True,'available':bool(row or fallback)}).encode()
             flow.response=http.Response.make(200,body,{'Content-Type':'application/json','Cache-Control':'no-store'})
         except (OSError,ValueError):
             flow.response=http.Response.make(503,b'{"capture":true,"available":false}',{'Content-Type':'application/json'})
@@ -148,6 +152,7 @@ def _request(flow):
             try:external_links.register(extra.get('asset',''))
             except ValueError:
                 flow.response=http.Response.make(400,b'Unsupported external link');return
+            capture_completion.expect(extra.get('asset',''),url)
         if kind=='book-start':MISSING_ONLY=False
         if kind=='update-mode':
             MISSING_ONLY=extra.get('missing_only')=='1';UPDATE_BOOK=str(book or '');UPDATE_UNTIL=time.monotonic()+600

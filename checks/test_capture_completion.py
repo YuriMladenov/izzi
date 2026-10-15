@@ -96,12 +96,48 @@ class Completion(unittest.TestCase):
         self.settled();self.assertTrue(completion.status(self.lesson,[],self.mapping,self.archive)['available'])
         self.assertFalse(completion.status('https://bg.izzi.digital/DOS/1/9.html',[],self.mapping,self.archive)['tracked'])
         with self.assertRaises(ValueError):completion.status(self.lesson,['x']*(completion.LIMIT+1),self.mapping,self.archive)
+    def test_declared_api_app_is_tracked_with_an_origin_only_referer(self):
+        app='https://api.izzi.digital/datastore/blocks/657825/index.html'
+        script='https://api.izzi.digital/datastore/blocks/657825/variables.js'
+        self.assertFalse(completion.watch(app,'GET','https://bg.izzi.digital/','unrelated'))
+        self.assertFalse(completion.expect(app,'https://bg.izzi.digital/DOS/2/9.html'))
+        from urllib.parse import urlencode
+        control=SimpleNamespace(request=http.Request.make('GET','https://bg.izzi.digital/__offline_capture__/event?'+urlencode({'kind':'link-register','url':self.lesson,'asset':app})),response=None)
+        with patch.object(capture_addon.external_links,'register') as register,patch.object(capture_addon,'event'):
+            capture_addon.request(control)
+            register.assert_called_once_with(app)
+        self.assertEqual(204,control.response.status_code)
+        self.assertIn(app,completion.CURRENT['urls'])
+        self.assertTrue(completion.watch(app+'?__izzi_offline_recover=retry','GET','https://bg.izzi.digital/','app'))
+        self.assertTrue(completion.watch(script,'GET',app,'script'))
+        self.add(app,b'<html>app</html>');self.add(script,b'window.test=true;')
+        completion.finish('app');self.settled()
+        self.assertFalse(completion.status(self.lesson,[],self.mapping,self.archive)['available'])
+        completion.finish('script');self.settled()
+        self.assertTrue(completion.status(self.lesson,[],self.mapping,self.archive)['available'])
+
     def test_api_queries_do_not_use_another_cached_response(self):
         other='https://api.izzi.digital/api/info?id=2';wanted='https://api.izzi.digital/api/info?id=1'
         self.add(other,b'{}');self.settled()
         self.assertFalse(completion.status(self.lesson,[wanted],self.mapping,self.archive)['available'])
         self.add(wanted,b'{}')
         self.assertTrue(completion.status(self.lesson,[wanted],self.mapping,self.archive)['available'])
+    def test_exact_asset_confirmation_does_not_accept_another_host_alias(self):
+        from urllib.parse import urlencode
+        bg='https://bg.izzi.digital/DOS/888413/datastore/blocks/657825/index.html'
+        api='https://api.izzi.digital/datastore/blocks/657825/index.html'
+        self.add(bg,b'<html>old app</html>')
+        def confirmed(exact):
+            query=urlencode({'url':api,**({'exact':'1'} if exact else {})})
+            flow=SimpleNamespace(request=http.Request.make('GET','https://bg.izzi.digital/__offline_capture__/image_status?'+query),response=None)
+            with patch.object(capture_addon,'load_json',return_value=self.mapping),patch.object(capture_addon,'ARCHIVE_DIR',self.archive):capture_addon.request(flow)
+            return json.loads(flow.response.content)['available']
+        self.assertTrue(confirmed(False));self.assertFalse(confirmed(True))
+        self.add(api,b'<html>origin missing</html>',404)
+        self.assertFalse(confirmed(True))
+        self.add(api,b'<html>real API app</html>')
+        self.assertTrue(confirmed(True))
+
     def test_proxy_status_endpoint_confirms_archive_and_rejects_invalid_request(self):
         flow=SimpleNamespace(request=http.Request.make('POST','https://bg.izzi.digital/__offline_capture__/lesson_status',content=json.dumps({'lesson':self.lesson,'assets':[]}).encode()),response=None)
         self.settled()
