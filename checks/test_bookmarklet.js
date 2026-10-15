@@ -124,7 +124,7 @@ async function images(){
  assert(events.some(x=>x.extra.reason==='няма годен body в архива'));
 }
 async function attachments(){
- const helper=source.slice(source.indexOf('async function captureLessonFiles'),source.indexOf("await ping('book-start',location);"));
+ const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_resources.js'),'utf8');
  const lesson=new URL('https://bg.izzi.digital/DOS/128031/8.html'),requested=[],events=[];
  const links=['./datastore/15/publication/128031/files/cParts.exe','./datastore/15/publication/128031/files/inpDevices.sb3?v=1782308254','javascript:alert(1)'];
  const frame={contentDocument:{baseURI:lesson.href,querySelectorAll:()=>links.map(href=>({getAttribute:()=>href})),documentElement:{outerHTML:''}},contentWindow:{fetch:async(url,options)=>{requested.push(new URL(url));assert.equal(options.mode,'no-cors');return {blob:async()=>({})};}}};

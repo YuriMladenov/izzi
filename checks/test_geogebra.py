@@ -64,7 +64,17 @@ class GeoGebra(unittest.TestCase):
         for name,body in [('login.ggb',b'<html>Login</html>'),('truncated.ggb',buffer.getvalue()[:30])]:
             row=self.add('/datastore/15/publication/1/files/'+name,body)
             self.assertFalse(usable_body(row,self.archive,'.ggb'))
+        api='https://api.izzi.digital/datastore/15/publication/30521/files/2021/01/11/1610377320_b7_u4_um_del_st.ggb'
+        legacy='https://bg.izzi.digital'+api[api.index('/datastore/'):]
+        self.add(legacy,b'<html>missing</html>',status=404)
+        self.add(api,buffer.getvalue(),content_type='application/vnd.geogebra.file')
+        lesson='https://bg.izzi.digital/DOS/888413/888428.html';self.add(lesson,b'<html>lesson</html>')
+        with patch.object(capture_completion,'CURRENT',None):
+            capture_completion.start(lesson);capture_completion.CURRENT['activity']-=2
+            self.assertTrue(capture_completion.status(lesson,[legacy],self.mapping,self.archive)['available'])
         self.start_server()
+        result=self.request('/DOS/888413'+api[api.index('/datastore/'):])
+        self.assertEqual(200,result[0]);self.assertEqual(buffer.getvalue(),result[2])
         status,headers,body=self.request('/DOS/1/datastore/15/publication/1/files/demo.ggb')
         self.assertEqual(200,status);self.assertEqual('application/vnd.geogebra.file',headers['Content-Type']);self.assertEqual(buffer.getvalue(),body)
         self.assertEqual(404,self.request('/datastore/15/publication/1/files/login.ggb')[0])

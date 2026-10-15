@@ -79,6 +79,12 @@ const endpoint=issue.kind==='youtube'?'/__offline_capture__/youtube?'+new URLSea
 const response=await fetch(O+endpoint,{cache:'no-store'});if(!response.ok||(await response.json()).available!==true)throw new Error('Препратката още не е потвърдена в архива');
 return;
 }
+if(issue.kind==='file'&&/\.ggb$/i.test(new URL(issue.url).pathname)){
+const result=await captureLessonFiles(frame,lesson,ping,{targets:[issue.url]});
+if(!result.total)throw new Error('GeoGebra файлът вече не присъства в урока');
+if(result.failed)throw new Error(result.issues[0]?.reason||'GeoGebra файлът още не е записан');
+await ping('resource-recovered',lesson,{asset:issue.url});return;
+}
 const url=new URL(issue.url),external=!/(^|\.)izzi\.digital$/.test(url.hostname);
 if(external)await ping('link-register',lesson,{asset:url.href});
 const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),issue.kind==='media'||issue.kind==='file'?240000:30000);

@@ -34,6 +34,29 @@ async function run(){
  assert.equal(result.failed,1);assert.equal(result.issues[0].kind,'page','missing runtime must stop strict capture');
  frame.contentDocument.documentElement.outerHTML='<div class="ggc-holder"></div>';
  result=await capture(frame,lesson,async()=>{});assert.equal(result.failed,1,'embedded/base64 applets also require the runtime');
+ // Failed bg file downloads fall back to the identical API datastore path.
+ installed=true;
+ const names=['1610377320_b7_u4_um_del_st.ggb','1610377263_b7_u4_del_st2.ggb'];
+ const paths=names.map(name=>'/datastore/15/publication/30521/files/2021/01/11/'+name);
+ frame.contentDocument.documentElement.outerHTML='<script>'+JSON.stringify(paths)+'</script>';
+ let validApi=true;
+ frame.contentWindow.fetch=async value=>{const url=new URL(value);requested.push(url);return {type:url.hostname==='api.izzi.digital'?'opaque':'basic',ok:false,status:url.hostname==='api.izzi.digital'?0:404,blob:async()=>({})};};
+ context.fetch=async value=>{const url=new URL(value);if(url.pathname.endsWith('geogebra_status'))return {ok:true,json:async()=>({installed})};const target=new URL(url.searchParams.get('url'));if(url.searchParams.get('exact')==='1')return {ok:true,json:async()=>({available:validApi&&target.hostname==='api.izzi.digital'})};return {ok:true,json:async()=>({available:validApi})};};
+ requested.length=0;result=await capture(frame,lesson,async()=>{});
+ assert.equal(result.total,2);assert.equal(result.failed,0);assert.equal(requested.length,4);
+ for(const path of paths)assert(requested.some(url=>url.hostname==='api.izzi.digital'&&url.pathname===path));
+ requested.length=0;result=await capture(frame,lesson,async()=>{},{skipAvailable:true});
+ assert.equal(result.failed,0);assert.equal(requested.length,0,'reuse an already archived API file through its original alias');
+ validApi=false;result=await capture(frame,lesson,async()=>{});
+ assert.equal(result.failed,2,'an HTTP response without a valid GGB archive cannot pass');
+ assert(result.issues.every(issue=>issue.reason.includes('bg.izzi.digital: HTTP 404')&&issue.reason.includes('api.izzi.digital')));
+ // Manual recovery uses the same fallback, restricted to the clicked file.
+ validApi=true;requested.length=0;
+ const strict=fs.readFileSync(path.join(__dirname,'../capture_strict.js'),'utf8');
+ const recover=vm.runInNewContext(strict+';recoverCaptureResource',context);
+ await recover({kind:'file',url:'https://bg.izzi.digital'+paths[0]},frame,lesson,async()=>{});
+ assert.equal(requested.length,2);assert(requested.every(url=>url.pathname===paths[0]));
+ validApi=false;await assert.rejects(()=>recover({kind:'file',url:'https://bg.izzi.digital'+paths[0]},frame,lesson,async()=>{}));
  // Only the known GeoGebra initialization button is activated, once per widget.
  const activate=vm.runInNewContext(helper+';captureGeoGebra',context);
  let clicks=0;
