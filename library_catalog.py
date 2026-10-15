@@ -5,12 +5,13 @@ LOCK=threading.Lock()
 
 def ordered_lessons(book_id,book,session,preferences):
     lessons=book.get('lessons',{})
-    order=[];captured={}
+    order=[];captured={};seen=set()
     for visit in session.get('visits',[]):
+        if visit.get('kind')!='lesson-start' or str(visit.get('book'))!=str(book_id):continue
         lid=str(visit.get('lesson',''))
-        if visit.get('kind')=='lesson-start' and str(visit.get('book'))==str(book_id) and lid in lessons and isinstance(visit.get('extra'),dict):
+        if lid in lessons and isinstance(visit.get('extra'),dict):
             captured.setdefault(lid,{}).update({key:value for key,value in visit['extra'].items() if value})
-        if visit.get('kind')=='lesson-start' and str(visit.get('book'))==str(book_id) and lid in lessons and lid not in order:order.append(lid)
+        if lid in lessons and lid not in seen:order.append(lid);seen.add(lid)
     settings=preferences.get(str(book_id),{})
     manual=settings.get('order',[])
     order=list(dict.fromkeys([str(x) for x in manual if str(x) in lessons]+order+list(lessons)))

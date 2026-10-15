@@ -121,7 +121,7 @@ def find(m,host,path,q,usable=None,book=None):
     if not compatible_books(requested_path,requested_path,book):return None
     exact=[]
     for scheme in ("https","http"):
-        for h in (host, host.split(":",1)[0]):
+        for h in dict.fromkeys((host, host.split(":",1)[0])):
             u=f"{scheme}://{h}{requested_path}"+(("?"+q) if q else "")
             r=pick(m.get(u),usable)
             if r: exact.append(r)

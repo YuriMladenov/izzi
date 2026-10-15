@@ -304,8 +304,11 @@ def resource_stats(mapping,book_id=None):
 
 def page_counts(mapping,book_id,book):
     pages=book.get('lessons',{})
+    # This is an availability counter, not a full integrity audit. Reading all
+    # lesson bodies here makes opening a book proportional to its total bytes.
+    # Replay and diagnostics still validate the complete HTML on demand.
     available=sum(find(mapping,SOURCE_HOST,p.get('path') or f'/DOS/{book_id}/{lid}.html','',
-                  lambda row:usable_body(row,ARCHIVE_DIR,'.html')) is not None
+                  lambda row:usable_body(row,ARCHIVE_DIR)) is not None
                   for lid,p in pages.items())
     return len(pages),available
 

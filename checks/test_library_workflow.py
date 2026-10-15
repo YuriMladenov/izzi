@@ -782,6 +782,45 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertIn('ID 1',text);self.assertIn('ID 2',text)
         self.assertIn('1 с наличен HTML',self.request('/__book__/1')[2].decode());self.assertIn('0 с наличен HTML',self.request('/__book__/2')[2].decode())
         self.assertIn('data:,',text)
+
+    def test_lesson_list_checks_files_without_reading_all_lesson_html(self):
+        import archive_db
+        book={'title':'Book','lessons':{}}
+        records=[]
+        for lid,extra in [('10',{}),('11',{}),('12',{'size':999999}),('13',{'status':404}),('14',{'status':206,'content_range':'bytes 0-29/999999'})]:
+            path=f'/DOS/1/{lid}.html';book['lessons'][lid]={'title':'Page '+lid,'path':path}
+            records.append(self.add('https://bg.izzi.digital:443'+path,('<html>'+lid+'x'*100000+'</html>').encode(),**extra))
+        # A removed body must never remain available because of a cached count.
+        (self.archive/records[1]['key']).unlink()
+        books={'1':book};other_records={}
+        for bid in ('42888','888827','887348'):
+            path=f'/DOS/{bid}/20.html'
+            books[bid]={'title':'Book '+bid,'lessons':{'20':{'title':'Page','path':path}}}
+            other_records[bid]=self.add(path,('<html>'+bid+'</html>').encode())
+        self.write('books.json',books);archive_db.initialize(self.state)
+        original_open=Path.open
+        def metadata_only(path,*args,**kwargs):
+            if path.parent==self.archive:raise AssertionError('Listing must not open lesson HTML bodies')
+            return original_open(path,*args,**kwargs)
+        self.start_server()
+        with patch.object(Path,'open',metadata_only),patch.object(archive_db.Index,'items',side_effect=AssertionError('Listing must not scan the resource index')):
+            status,_,body=self.request('/__book__/1')
+            self.assertEqual(200,status);self.assertIn('1 с наличен HTML',body.decode())
+            for bid,row in other_records.items():
+                with self.subTest(book=bid):
+                    status,_,body=self.request('/__book__/'+bid)
+                    self.assertEqual(200,status);self.assertIn('1 с наличен HTML',body.decode())
+                    (self.archive/row['key']).unlink()
+                    self.assertIn('0 с наличен HTML',self.request('/__book__/'+bid)[2].decode())
+            (self.archive/records[0]['key']).unlink()
+            self.assertIn('0 с наличен HTML',self.request('/__book__/1')[2].decode())
+
+    def test_lesson_list_optimization_keeps_full_replay_html_validation(self):
+        self.write('books.json',{'1':{'title':'Book','lessons':{'2':{'title':'Page','path':'/DOS/1/2.html'}}}})
+        self.add('/DOS/1/2.html',b'<html>'+b'x'*65536+b'\x00'+b'</html>')
+        self.start_server()
+        self.assertEqual(200,self.request('/__book__/1')[0])
+        self.assertEqual(404,self.request('/DOS/1/2.html')[0],'HTML with a NUL after the first chunk must remain rejected during replay')
     def test_two_books_private_aliases_and_unscoped_ambiguity(self):
         self.add('/DOS/1/profil/app.js',b'book one',content_type='application/javascript')
         self.add('/DOS/2/profil/app.js',b'book two',content_type='application/javascript')
