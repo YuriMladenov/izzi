@@ -15,6 +15,7 @@ import operations
 import archive_db
 import replay_cache
 import geogebra_runtime
+import admin_account
 import bundled_assets
 from bundled_assets import bundled_font
 from archive_state import load as load_archive_state
@@ -521,9 +522,10 @@ class H(BaseHTTPRequestHandler):
 
     def route(self):
         p=urlparse(self.path)
-        readonly=not self.control_local()
+        if p.path.startswith('/__admin__'):return self.admin_page()
+        readonly=not self.admin_allowed()
         if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__','/__cleanup__','/__videos__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/','/__videos__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
-            return self.sendb(b'Local administration only','text/plain; charset=utf-8',403)
+            return self.sendb(b'Administrator required','text/plain; charset=utf-8',403)
         if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/videos.js','/__ui__/izzi-logo.svg'):
             filename=p.path.rsplit('/',1)[1]
             return self.send_cached((webui.ASSETS/filename).read_bytes(),'image/svg+xml' if filename.endswith('.svg') else 'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
@@ -534,21 +536,21 @@ class H(BaseHTTPRequestHandler):
             except (OSError,ValueError) as error:return self.sendb(json.dumps({'error':str(error)},ensure_ascii=False).encode(),'application/json',503)
             return self.sendb(json.dumps(data,ensure_ascii=False).encode(),'application/json')
         if p.path=='/__ops__/status':
-            if not self.control_local():return self.sendb(b'{"error":"Local access only"}','application/json',403)
+            if not self.admin_allowed():return self.sendb(b'{"error":"Admin login required"}','application/json',403)
             return self.sendb(json.dumps(operations.tasks.snapshot(),ensure_ascii=False).encode(),'application/json')
         if p.path=='/__operations__':
             content='<h1>Capture и проверки</h1><p><a href="/__videos__">Провери и довърши недовършени видеа</a></p>'
-            if not self.control_local():
+            if not self.admin_allowed():
                 content+='<p class="empty">Управлението е достъпно само на компютъра със сървъра през http://127.0.0.1:8765/.</p>'
             else:
-                content+='<p>Firefox proxy: 127.0.0.1:8877. Login, сертификатът и Disable Cache се настройват в браузъра. При активен capture отчетите показват текущия момент; окончателните проверки пусни след обхода.</p><div id="operations" data-token="%s"><p id="operation-message" role="status"></p>'%html.escape(operations.tasks.token,quote=True)
+                content+='<p>Firefox proxy: адресът на компютъра със сървъра и порт 8877 (127.0.0.1:8877 при локален браузър). Login, сертификатът и Disable Cache се настройват в браузъра. При активен capture отчетите показват текущия момент; окончателните проверки пусни след обхода.</p><div id="operations" data-token="%s"><p id="operation-message" role="status"></p>'%html.escape(operations.tasks.token,quote=True)
                 for task,title in [('capture','Capture proxy'),('checks','Всички проверки')]:
                     content+='<section class="task-panel"><h2>%s</h2><p id="%s-state" role="status">Зареждане…</p><button data-task="%s" data-action="start" disabled>Стартирай</button> <button data-task="%s" data-action="stop" disabled>Спри</button><pre id="%s-log" class="task-log" aria-label="Лог %s"></pre></section>'%(title,task,task,task,task,title)
                 content+='</div><script src="/__ui__/operations.js" defer></script>'
-            return self.sendb(webui.page(content,'Управление','operations').encode(),'text/html; charset=utf-8')
+            return self.sendb(self.ui(content,'Управление','operations').encode(),'text/html; charset=utf-8')
         if p.path=='/__help__':
-            content='<h1>Как да използвам библиотеката</h1><h2>1. Запиши съдържание</h2><p>На компютъра с архива стартирай capture_mode.bat. Настрой Firefox proxy към 127.0.0.1:8877 и отвори оригиналния учебник с нормален login. Включи Disable Cache. Използвай обновения bookmarklet за избрания срок или раздел.</p><h2>2. Провери и подреди</h2><p>Изпълни run_all_checks.bat. Отвори учебника в библиотеката и избери „Подреди / преименувай / скрий“ за локални настройки.</p><h2>3. Възстанови ресурси</h2><p>От „Липсващи ресурси“ използвай „Изтегли“ или „Изтегли всички“ при интернет и активен capture proxy. След края презареди списъка.</p><h2>Достъп от локалната мрежа</h2><p>От друго устройство отвори http://&lt;IPv4 на компютъра&gt;:8765/. Firewall трябва да допуска порт 8765 в Private мрежата. Няма login защита; използвай доверена мрежа.</p><h2>Обновяване</h2><p>Спри capture и сървъра, запази резервно копие на archive/state и пусни update_project.bat. Стартирай сървъра отново. При нов bookmarklet обнови и адреса на Firefox bookmark.</p>'
-            return self.sendb(webui.page(content,'Помощ','help').encode(),'text/html; charset=utf-8')
+            content='<h1>Как да използвам библиотеката</h1><h2>1. Запиши съдържание</h2><p>На компютъра с архива стартирай capture_mode.bat. Настрой Firefox proxy към 127.0.0.1:8877 и отвори оригиналния учебник с нормален login. Включи Disable Cache. Използвай обновения bookmarklet за избрания срок или раздел.</p><h2>2. Провери и подреди</h2><p>Изпълни run_all_checks.bat. Отвори учебника в библиотеката и избери „Подреди / преименувай / скрий“ за локални настройки.</p><h2>3. Възстанови ресурси</h2><p>От „Липсващи ресурси“ използвай „Изтегли“ или „Изтегли всички“ при интернет и активен capture proxy. След края презареди списъка.</p><h2>Достъп от локалната мрежа</h2><p>От друго устройство отвори http://&lt;IPv4 на компютъра&gt;:8765/. Firewall трябва да допуска порт 8765 в Private мрежата. За управление от LAN използвай „Администраторски вход“. Началният профил е admin с парола izzi. Данните се сменят от меню „Администратор“. Без вход библиотеката е достъпна за четене.</p><h2>Обновяване</h2><p>Спри capture и сървъра, запази резервно копие на archive/state и пусни update_project.bat. Стартирай сървъра отново. При нов bookmarklet обнови и адреса на Firefox bookmark.</p>'
+            return self.sendb(self.ui(content,'Помощ','help').encode(),'text/html; charset=utf-8')
         if p.path=='/__cleanup__':return self.cleanup_page(p)
         try:
             m=load_archive_state(URL_MAP_FILE,{});books=load_archive_state(BOOKS_FILE,{})
@@ -562,7 +564,7 @@ class H(BaseHTTPRequestHandler):
             try:result=delete_book.plan(bid,STATE_DIR,ARCHIVE_DIR)
             except (ValueError,OSError):return self.sendb(b'Deletion preview unavailable','text/plain',400)
             content='<h1>Изтриване на учебник</h1><p><b>%s</b></p><p>Ще се премахнат учебникът, настройките му, локалният му журнал и %d отделни файла (%.1f MB). Споделените и неразпознатите общи ресурси се запазват. Изтриването не може да се отмени. Спри capture преди потвърждението.</p><form method="post"><input type="hidden" name="token" value="%s"><button>Изтрий учебника и съдържанието</button></form><p><a href="/__book__/%s">Отказ</a></p>'%(html.escape(result['title']),len(result['files']),result['bytes']/1048576,html.escape(operations.tasks.token,quote=True),html.escape(bid))
-            return self.sendb(webui.page(content,'Изтриване').encode(),'text/html; charset=utf-8')
+            return self.sendb(self.ui(content,'Изтриване').encode(),'text/html; charset=utf-8')
         if p.path=="/":
             covers=book_covers.catalog_covers(m,ARCHIVE_DIR,books)
             stages={**{str(grade)+'. клас':[] for grade in range(1,13)},'Без определен клас':[]}
@@ -575,7 +577,7 @@ class H(BaseHTTPRequestHandler):
             page=''.join('<section class="book-stage"><h2>'+stage+'</h2><ul class="book-grid">'+''.join(cards)+'</ul></section>' for stage,cards in stages.items() if cards)
             if not items:
                 page+='<section class="empty"><h2>Библиотеката е празна</h2>'+('<p>Все още няма добавени учебници.</p>' if readonly else '<p>Запиши първия си урок чрез capture или импортирай HAR файл. Тук ще се появят учебниците от твоя архив.</p><a href="/__help__">Как да започна →</a>')+'</section>'
-            return self.sendb(webui.page(page,search=bool(items),catalog=True,readonly=readonly).encode(),"text/html; charset=utf-8")
+            return self.sendb(self.ui(page,search=bool(items),catalog=True,readonly=readonly).encode(),"text/html; charset=utf-8")
         if p.path.startswith("/__book__/"):
             bid=p.path.split("/")[-1];b=books.get(bid)
             if not b:return self.sendb(b"Unknown book","text/plain",404)
@@ -597,8 +599,9 @@ class H(BaseHTTPRequestHandler):
                 page='<!doctype html><meta charset="utf-8"><h1>Подреждане на уроци</h1><p>По-малкият номер се показва по-рано. Скриването запазва архивираните файлове и директните адреси на уроците.</p><form method="post" action="/__catalog__/%s"><table><tr><th>ID</th><th>Ред</th><th>Име</th><th>Раздел</th><th>Оригинален номер</th><th>Скрит</th></tr>%s</table><button>Запази</button></form><p><a href="/__book__/%s">Назад</a></p>'%(html.escape(bid),''.join(rows),html.escape(bid))
                 notice='<p>Автоматично предложение от архива. Провери полетата и натисни „Запази“. Ако няма данни за раздел, попълни го ръчно.</p>' if automatic else '<p><a class="download" href="?edit=1&amp;auto=1">Предложи имена и раздели от архива</a></p>'
                 page=page.replace('<form ',notice+'<form ',1)
+                page=page.replace('<table>', '<input type="hidden" name="token" value="'+html.escape(operations.tasks.token,quote=True)+'"><table>',1)
                 page=page.replace('<table>','<div class="table-wrap"><table>').replace('</table>','</table></div>')
-                return self.sendb(webui.page(page,'Подреждане').encode(),'text/html; charset=utf-8')
+                return self.sendb(self.ui(page,'Подреждане').encode(),'text/html; charset=utf-8')
             groups={}
             for x in ls:
                 if not x['hidden']:groups.setdefault(x.get('module') or '',[]).append(x)
@@ -612,7 +615,7 @@ class H(BaseHTTPRequestHandler):
             edit_link='' if readonly else ' · <a class="download" href="?edit=1">Подреди / преименувай / скрий</a> · <a class="download" href="/__delete_book__/'+html.escape(bid)+'">Изтрий учебника</a>'
             content='<h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a>%s</p>%s'%(html.escape(b["title"]),html.escape(bid),known,available,edit_link,items)
             if not items:content+='<p class="empty">Няма показани уроци. Провери скритите страници в редактора.</p>'
-            return self.sendb(webui.page(content,'Уроци',search=bool(items),readonly=readonly).encode(),"text/html; charset=utf-8")
+            return self.sendb(self.ui(content,'Уроци',search=bool(items),readonly=readonly).encode(),"text/html; charset=utf-8")
         if p.path=="/__offline__/gtag.js":
             return self.sendb(b"window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){window.dataLayer.push(arguments);};","application/javascript")
         if p.path=="/__offline__/youtube-api.js":
@@ -632,7 +635,7 @@ class H(BaseHTTPRequestHandler):
                 for endpoint,count in book['endpoints'].items():content+='<tr><td>%s</td><td>%d</td></tr>'%(html.escape(endpoint),count)
                 content+='</table></div>'
             if not summary['books']:content+='<p class="empty">Все още няма локални записи.</p>'
-            return self.sendb(webui.page(content,'Журнал','journal').encode(),'text/html; charset=utf-8')
+            return self.sendb(self.ui(content,'Журнал','journal').encode(),'text/html; charset=utf-8')
         if p.path=="/__offline__/progress":
             return self.sendb(json.dumps(progress_journal.summarize(PROGRESS_DIR),ensure_ascii=False).encode(),"application/json")
         if p.path.startswith('/__offline__/youtube-video/'):
@@ -677,7 +680,7 @@ class H(BaseHTTPRequestHandler):
             page+='<p><button id="download-all">Изтегли всички</button> <button id="download-stop" disabled>Спри</button></p><p id="download-status" role="status">Изтеглянето включва ресурсите от списъка и предупрежденията. Origin 404 може да остане недостъпен.</p>'
             page+='<script>'+Path(__file__).with_name('missing_download.js').read_text(encoding='utf-8')+'</script>'
             page=re.sub(r'<style>.*?</style>','',page,flags=re.S).replace('<ul>','<ul class="resource-list">')
-            return self.sendb(webui.page(page,'Липсващи ресурси','missing',search=bool(missing or warnings)).encode(),"text/html; charset=utf-8")
+            return self.sendb(self.ui(page,'Липсващи ресурси','missing',search=bool(missing or warnings)).encode(),"text/html; charset=utf-8")
         if p.path.startswith('/__offline_capture__/'):
             # Capture probes belong to the proxy, never to the archived site.
             return self.sendb(b'{"capture":false,"available":false}','application/json')
@@ -692,6 +695,8 @@ class H(BaseHTTPRequestHandler):
     def do_HEAD(self):
         with archive_db.read_session():self.route()
     def progress(self):
+        if urlparse(self.path).path.startswith('/__admin__'):
+            self.close_connection=True;return self.sendb(b'Method not allowed','text/plain',405,{'Allow':'GET, HEAD, POST'})
         if self.headers.get("Transfer-Encoding"):
             self.close_connection=True
             return self.sendb(b'{"saved":false,"error":"transfer_encoding_unsupported"}',"application/json",501)
@@ -716,12 +721,110 @@ class H(BaseHTTPRequestHandler):
         print("[PROGRESS]",bid,self.command,urlparse(self.path).path)
         self.sendb(b'{"offline":true,"saved":true}',"application/json",200)
     def do_POST(self):
+        if urlparse(self.path).path.startswith('/__admin__'):return self.admin_action()
         if urlparse(self.path).path=='/__cleanup__':return self.cleanup_action()
         if urlparse(self.path).path.startswith('/__delete_book__/'):return self.delete_book_action()
         if urlparse(self.path).path in ('/__ops__/action','/__videos__/action'):return self.control_action()
         if urlparse(self.path).path.startswith('/__catalog__/'):
             return self.catalog_save()
         self.progress()
+
+    def auth(self):
+        return admin_account.manager(STATE_DIR)
+
+    def admin_session(self):
+        return self.auth().session(self.headers.get('Cookie',''),self.headers.get('Host',''))
+
+    def admin_allowed(self):
+        return self.control_local() or self.admin_session() is not None
+
+    def origin_valid(self):
+        origin=self.headers.get('Origin')
+        if not origin:return True
+        p=urlparse(origin)
+        return p.scheme in ('http','https') and p.netloc.lower()==self.headers.get('Host','').lower() and not p.username and not p.password and not p.query and not p.fragment and p.path in ('','/')
+
+    def ui(self,*args,**kwargs):
+        kwargs.setdefault('readonly',not self.admin_allowed())
+        kwargs['admin_session']=self.admin_session() is not None
+        return webui.page(*args,**kwargs)
+
+    def admin_cookie(self,name,value,age):
+        import ssl
+        return admin_account.cookie(name,value,age,isinstance(self.connection,ssl.SSLSocket))
+
+    def admin_redirect(self,target,cookie=None):
+        headers={'Location':target}
+        if cookie:headers['Set-Cookie']=cookie
+        return self.sendb(b'','text/plain',303,headers)
+
+    def admin_form(self,purpose,message='',status=200):
+        try:
+            record=self.auth().record()
+            nonce=self.auth().nonce(self.headers.get('Host',''),purpose)
+        except (OSError,ValueError):return self.sendb('Настройката на профила е недостъпна. Провери state/admin_account.json или изпълни admin_account.py на сървъра.'.encode(),'text/plain; charset=utf-8',503)
+        token='<input type="hidden" name="csrf" value="'+html.escape(nonce,quote=True)+'">'
+        note='<p class="auth-message" role="status">'+html.escape(message)+'</p>' if message else ''
+        if purpose=='login':
+            content='<h1>Администраторски вход</h1>'+note
+            if not record:content+='<p>Все още няма администраторски профил. Създай го от меню „Администратор“ на компютъра с библиотеката през http://127.0.0.1:8765/.</p>'
+            else:content+='<form method="post" action="/__admin__/login" class="admin-form">'+token+'<label>Потребителско име<input name="username" autocomplete="username" maxlength="64" required></label><label>Парола<input name="password" type="password" autocomplete="current-password" maxlength="1024" required></label><button>Вход</button></form><p>Сесията е валидна до 8 часа. След работа използвай „Изход“.</p>'
+        elif purpose=='account':
+            username=html.escape(record['username'] if record else 'admin',quote=True)
+            content='<h1>Администраторски профил</h1>'+note+'<p>Този профил дава достъп до управлението на библиотеката през локалната мрежа. Локалното управление през 127.0.0.1 остава без вход.</p><form method="post" action="/__admin__/account" class="admin-form">'+token+'<label>Потребителско име<input name="username" value="'+username+'" autocomplete="username" minlength="3" maxlength="64" required></label>'
+            if not self.control_local():content+='<label>Текуща парола<input name="current_password" type="password" autocomplete="current-password" maxlength="1024" required></label>'
+            content+='<label>Нова парола — поне 4 знака<input name="password" type="password" autocomplete="new-password" minlength="4" maxlength="1024" required></label><label>Повтори новата парола<input name="confirm" type="password" autocomplete="new-password" minlength="4" maxlength="1024" required></label><button>Запази профила</button></form><p>Запазването прекратява всички предишни администраторски сесии. При забравена парола я смени от този екран на компютъра с библиотеката.</p>'
+        else:
+            content='<h1>Изход от управлението</h1><form method="post" action="/__admin__/logout" class="admin-form">'+token+'<p>Библиотеката ще остане достъпна за четене.</p><button>Изход</button></form>'
+        content+='<p><a href="/">← Библиотека</a></p>'
+        headers={'Set-Cookie':self.admin_cookie(admin_account.NONCE_COOKIE,nonce,admin_account.NONCE_TTL),'X-Frame-Options':'DENY','Content-Security-Policy':"frame-ancestors 'none'; form-action 'self'",'Referrer-Policy':'same-origin'}
+        return self.sendb(self.ui(content,'Администратор','admin').encode(),'text/html; charset=utf-8',status,headers)
+
+    def admin_page(self):
+        p=urlparse(self.path)
+        if p.path in ('/__admin__','/__admin__/'):return self.admin_redirect('/__admin__/account' if self.admin_allowed() else '/__admin__/login')
+        if p.path=='/__admin__/login':return self.admin_form('login','Паролата е сменена. Влез с новите данни.' if 'changed' in parse_qs(p.query) else '')
+        if p.path=='/__admin__/account':
+            if not self.admin_allowed():return self.admin_redirect('/__admin__/login')
+            return self.admin_form('account','Профилът е запазен. Предишните сесии са прекратени.' if 'saved' in parse_qs(p.query) else '')
+        if p.path=='/__admin__/logout':return self.admin_form('logout')
+        return self.sendb(b'Not found','text/plain',404)
+
+    def admin_action(self):
+        purpose={'/__admin__/login':'login','/__admin__/account':'account','/__admin__/logout':'logout'}.get(urlparse(self.path).path)
+        if not purpose:return self.sendb(b'Not found','text/plain',404)
+        if not self.origin_valid() or not self.auth().valid_authority(self.headers.get('Host','')):
+            self.close_connection=True;return self.sendb(b'Forbidden origin','text/plain',403)
+        if purpose=='account' and not self.admin_allowed():
+            self.close_connection=True;return self.sendb(b'Administrator required','text/plain',403)
+        try:
+            if self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type','').split(';')[0]!='application/x-www-form-urlencoded':raise ValueError('Invalid form')
+            length=int(self.headers.get('Content-Length','0'))
+            if not 0<length<=8192:raise ValueError('Invalid length')
+            self.connection.settimeout(10);raw=self.rfile.read(length)
+            if len(raw)!=length:raise ValueError('Incomplete form')
+            form=parse_qs(raw.decode('utf8'),keep_blank_values=True,max_num_fields=12)
+            value=lambda key:form.get(key,[''])[0]
+            if not self.auth().consume_nonce(self.headers.get('Cookie',''),value('csrf'),self.headers.get('Host',''),purpose):
+                return self.sendb(b'Invalid confirmation. Reload the form.','text/plain',403)
+            if purpose=='logout':
+                self.auth().logout(self.headers.get('Cookie',''))
+                return self.admin_redirect('/',self.admin_cookie(admin_account.COOKIE,'',0))
+            if purpose=='account':
+                if value('password')!=value('confirm'):raise ValueError('Двете пароли не съвпадат.')
+                self.auth().set_account(value('username'),value('password'),local=self.control_local(),current_password=value('current_password'))
+                return self.admin_redirect('/__admin__/account?saved=1' if self.control_local() else '/__admin__/login?changed=1',self.admin_cookie(admin_account.COOKIE,'',0))
+            token=self.auth().login(value('username'),value('password'),self.client_address[0],self.headers.get('Host',''))
+            if not token:return self.admin_form('login','Неправилно потребителско име или парола.',401)
+            return self.admin_redirect('/',self.admin_cookie(admin_account.COOKIE,token,admin_account.SESSION_TTL))
+        except admin_account.LoginThrottled:
+            self.close_connection=True
+            return self.sendb('Твърде много опити за вход. Опитай след 5 минути.'.encode(),'text/plain; charset=utf-8',429,{'Retry-After':'300'})
+        except (UnicodeError,ValueError) as error:
+            self.close_connection=True
+            return self.admin_form(purpose,str(error),400)
+        except (OSError,TimeoutError):
+            self.close_connection=True;return self.sendb(b'Administrator account unavailable','text/plain',503)
 
     def control_local(self):
         # Check the socket peer AND Host; forwarded headers are never trusted.
@@ -730,7 +833,7 @@ class H(BaseHTTPRequestHandler):
 
     def control_action(self):
         origin=self.headers.get('Origin')
-        if not self.control_local() or (origin and origin!='http://'+self.headers.get('Host','')) or self.headers.get('X-IZZI-Control')!=operations.tasks.token:
+        if not self.admin_allowed() or not self.origin_valid() or self.headers.get('X-IZZI-Control')!=operations.tasks.token:
             self.close_connection=True
             return self.sendb(b'{"error":"Local control required"}','application/json',403)
         try:
@@ -762,7 +865,7 @@ class H(BaseHTTPRequestHandler):
             report=video_resume.inspect()
             content+='<div id="video-resume" data-token="%s"><p id="video-message" role="status"></p><button id="videos-refresh">Провери отново</button> <button data-video="all" %s>Довърши всички</button> <button id="videos-stop" disabled>Спри изтеглянето</button><p id="videos-state" role="status"></p><div id="videos-list"></div><pre id="videos-log" class="task-log"></pre></div><script src="/__ui__/videos.js" defer></script>'%(html.escape(operations.tasks.token,quote=True),'disabled' if not report['videos'] or report['errors'] else '')
         except (OSError,ValueError) as error:content+='<p class="empty">Проверката е блокирана: '+html.escape(str(error))+'</p>'
-        return self.sendb(webui.page(content,'Недовършени видеа','videos').encode(),'text/html; charset=utf-8')
+        return self.sendb(self.ui(content,'Недовършени видеа','videos').encode(),'text/html; charset=utf-8')
 
     def cleanup_page(self,p):
         import archive_cleanup
@@ -788,11 +891,11 @@ class H(BaseHTTPRequestHandler):
                 for batch in archive_cleanup.batches(STATE_DIR):
                     content+='<section><h2>Папка за възстановяване %s</h2><p>%d файла · %.1f MB</p><form method="post">%s<input type="hidden" name="action" value="restore"><input type="hidden" name="batch" value="%s"><button>Възстанови</button></form><p><a href="?purge=%s">Изтрий окончателно…</a></p></section>'%(batch['id'],batch['count'],batch['bytes']/1048576,token,batch['id'],batch['id'])
             except (OSError,ValueError):content+='<p>Папките за възстановяване не могат да се прочетат.</p>'
-        return self.sendb(webui.page(content,'Почистване','cleanup').encode(),'text/html; charset=utf-8')
+        return self.sendb(self.ui(content,'Почистване','cleanup').encode(),'text/html; charset=utf-8')
 
     def cleanup_action(self):
-        if not self.control_local() or (self.headers.get('Origin') and self.headers['Origin']!='http://'+self.headers.get('Host','')):
-            self.close_connection=True;return self.sendb(b'Local administration only','text/plain',403)
+        if not self.admin_allowed() or not self.origin_valid():
+            self.close_connection=True;return self.sendb(b'Administrator required','text/plain',403)
         try:
             if self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type','').split(';')[0]!='application/x-www-form-urlencoded':raise ValueError('Invalid request')
             length=int(self.headers.get('Content-Length','0'))
@@ -812,8 +915,8 @@ class H(BaseHTTPRequestHandler):
         return self.sendb(b'','text/plain',303,extra={'Location':'/__cleanup__'})
 
     def delete_book_action(self):
-        if not self.control_local() or (self.headers.get('Origin') and self.headers['Origin']!='http://'+self.headers.get('Host','')):
-            self.close_connection=True;return self.sendb(b'Local administration only','text/plain',403)
+        if not self.admin_allowed() or not self.origin_valid():
+            self.close_connection=True;return self.sendb(b'Administrator required','text/plain',403)
         try:
             length=int(self.headers.get('Content-Length','0'))
             if self.headers.get('Transfer-Encoding') or not 0<length<=2048:raise ValueError('Invalid request')
@@ -828,12 +931,12 @@ class H(BaseHTTPRequestHandler):
         return self.sendb(b'','text/plain',303,extra={'Location':'/'})
 
     def catalog_save(self):
-        if not self.control_local():
+        if not self.admin_allowed():
             self.close_connection=True
-            return self.sendb(b'Local administration only','text/plain',403)
+            return self.sendb(b'Administrator required','text/plain',403)
         # Browser cross-origin writes must not modify the local catalogue.
         origin=self.headers.get('Origin')
-        if origin and origin!='http://'+self.headers.get('Host',''):
+        if not self.origin_valid():
             return self.sendb(b'Forbidden origin','text/plain',403)
         if self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type','').split(';')[0]!='application/x-www-form-urlencoded':
             return self.sendb(b'Invalid form','text/plain',400)
@@ -847,6 +950,8 @@ class H(BaseHTTPRequestHandler):
             books=load_archive_state(BOOKS_FILE,{})
             if bid not in books:return self.sendb(b'Unknown book','text/plain',404)
             form=parse_qs(raw.decode('utf-8'),keep_blank_values=True)
+            token=form.pop('token',None)
+            if not self.control_local() and token!=[operations.tasks.token]:return self.sendb(b'Invalid confirmation','text/plain',403)
             library_catalog.update(STATE_DIR/'library_catalog.json',bid,books[bid].get('lessons',{}),form)
         except (ValueError,UnicodeError):
             return self.sendb(b'Invalid catalogue form','text/plain',400)
