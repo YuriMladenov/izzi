@@ -1,6 +1,7 @@
 archive/
 state/
 captures/
+capture/
 *.har
 __pycache__/
 .venv/
