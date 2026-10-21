@@ -59,6 +59,52 @@ class LibraryWorkflow(unittest.TestCase):
         except urllib.error.HTTPError as error:response=error
         with response:return response.code,response.headers,response.read()
 
+    def test_legacy_school_test_requires_questions_and_replays_fresh_jsonp_callback(self):
+        import external_links as links,school_test_data,capture_addon
+        from types import SimpleNamespace
+        from mitmproxy import http
+        root='https://api.izzi.digital/datastore/blocks/9/index.html'
+        lib='https://tests.school.bg/assets/libraries/jquery-2.2.0/jquery-2.2.0.min.js'
+        body=('<html><script src="'+lib+'"></script><script>var testid=109;$.ajax({url:"https://tests.school.bg/api/tests/get/"+testid+"/"});</script></html>').encode()
+        self.add(root,body)
+        with patch.multiple(links,FILE=self.state/'links.json',INDEX=None):
+            links.register(root);links.discover(root,body,'text/html')
+            report=links.status(root,self.mapping,self.archive)
+            self.assertFalse(report['available']);self.assertNotIn(lib,report['missing'])
+            self.assertIn('въпросите',report['problem'])
+            request='https://tests.school.bg/api/tests/get/109/?testrequest=jQueryOld&_=123'
+            payload={'testinfo':{'id':'109','name':'Test'},'testdata':[{'question':{'id':1,'question':'2+2?'},'answers':[]}]}
+            links.associate(request,'https://api.izzi.digital/')
+            redirected=request.replace('tests.school.bg','klett.bg')
+            links.associate_redirect(redirected,request)
+            self.assertIn(redirected,links.state()['data'][root]['resources'])
+            self.add(request,('jQueryOld('+json.dumps(payload)+');').encode(),content_type='application/javascript')
+            self.add(redirected,('jQueryOld('+json.dumps(payload)+');').encode(),content_type='application/javascript')
+            self.assertTrue(links.status(root,self.mapping,self.archive)['available'])
+            payload['testdata'][0]['question']['link']='https://klett.bg/test-figure.svg'
+            self.mapping[request]=[]
+            self.add(request,('jQueryOld('+json.dumps(payload)+');').encode(),content_type='application/javascript')
+            self.assertIn('https://klett.bg/test-figure.svg',links.status(root,self.mapping,self.archive)['missing'])
+            self.add('https://klett.bg/test-figure.svg',b'<svg xmlns="http://www.w3.org/2000/svg"></svg>',content_type='image/svg+xml')
+            self.assertTrue(links.status(root,self.mapping,self.archive)['available'])
+            wrong={**payload,'testinfo':{'id':'110'}}
+            self.assertIsNone(school_test_data.decode(json.dumps(wrong).encode(),109))
+            with self.assertRaises(ValueError):school_test_data.decode(b'<html>Home</html>',109)
+        self.start_server()
+        status,headers,data=self.request('/__host__/tests.school.bg/api/tests/get/109/?testrequest=jQueryNew&_=999')
+        self.assertEqual(200,status);self.assertTrue(data.startswith(b'jQueryNew('));self.assertNotIn(b'jQueryOld',data)
+        self.assertEqual(400,self.request('/__host__/tests.school.bg/api/tests/get/109/?testrequest=bad%28%29')[0])
+        self.assertEqual(404,self.request('/__host__/tests.school.bg/api/tests/get/110/?testrequest=jQueryNew')[0])
+        self.assertEqual(501,self.request('/__host__/tests.school.bg/api/tests/submit/109?testsubmit=jQueryNew')[0])
+        status,headers,data=self.request('/__host__/tests.school.bg/assets/libraries/jquery-2.2.0/jquery-2.2.0.min.js')
+        self.assertEqual(200,status);self.assertIn(b'jQuery v2.2.0',data[:100])
+        flow=SimpleNamespace(id='jquery',request=http.Request.make('GET',lib),response=None)
+        with patch.multiple(capture_addon,ARCHIVE_DIR=self.archive,URL_MAP_FILE=self.state/'url_map.json'):
+            capture_addon.request(flow)
+        self.assertEqual(200,flow.response.status_code);self.assertIn(b'jQuery v2.2.0',flow.response.content[:100])
+        fake=self.add('/fake.js',b'<html>Home</html>',content_type='text/html')
+        self.assertFalse(server.usable_body(fake,self.archive,'.js'))
+
     def test_prepared_static_cache_invalidates_modified_and_deleted_sources(self):
         row=self.add('/DOS/1/profil/test.js',b'const value=1;',content_type='application/javascript')
         self.start_server()

@@ -32,6 +32,9 @@ def usable_body(r,archive,ext=''):
     if r.get('status',200) not in (200,206):return False
     if r.get('size') is not None and blob.stat().st_size!=r['size']:return False
     if r.get('status')==206 and not complete_body(r,blob.stat().st_size):return False
+    if ext in {'.js','.mjs','.css'}:
+        with blob.open('rb') as stream:header=stream.read(1024)
+        if re.match(br'(?:\xef\xbb\xbf)?\s*<(?:!doctype\s+html|html|head|body)\b',header,re.I):return False
     if ext in {'.html','.htm'}:
         with blob.open('rb') as stream:
             while True:

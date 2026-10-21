@@ -6,6 +6,8 @@ from urllib.parse import urlsplit,urljoin
 from pathlib import Path
 from config import STATE_DIR
 from resource_policy import optional_reason
+import bundled_assets
+import school_test_data
 from import_har import load,save
 from replay_resolver import find,usable_body
 from cache_bust_recovery import canonical_url
@@ -76,7 +78,7 @@ def hosts():
 def associate(url,referer):
     associate_many([(url,referer)])
 
-def associate_many(pairs):
+def associate_many(pairs,roots_only=None):
     global INDEX
     with LOCK:
         current=state();data=dict(current['data']);changed=set()
@@ -85,11 +87,18 @@ def associate_many(pairs):
                 if not valid_url(url):continue
                 url=normalized(url);referer=normalized(referer) if referer else ''
                 roots=set(current['owners'].get(url,()))|set(current['owners'].get(referer,()))
+                if roots_only is not None:roots.intersection_update(roots_only)
+                number=school_test_data.test_number(url)
+                if number is not None:
+                    # JSONP callback/cache-buster parameters change for each load.
+                    base='https://tests.school.bg/api/tests/get/'+str(number)+'/'
+                    roots.update(current['owners'].get(base,()))
                 ref=urlsplit(referer)
                 # Platform home/API traffic cannot identify one linked app.
                 # Never attach the whole bookshelf to every IZZI link.
                 if ref.path in ('','/') and ref.hostname and not (ref.hostname=='izzi.digital' or ref.hostname.endswith('.izzi.digital')):
                     roots.update(current['by_host'].get(ref.hostname,()))
+                if roots_only is not None:roots.intersection_update(roots_only)
                 for root in roots:
                     if root in current['owners'].get(url,()):continue
                     if root not in changed:
@@ -102,6 +111,19 @@ def associate_many(pairs):
             if changed:commit(data)
         except Exception:
             INDEX=None;raise
+
+def associate_redirect(target,source):
+    """A redirect from a script/style still expects that type at its destination."""
+    if not valid_url(target) or not valid_url(source):return
+    target=normalized(target);source=normalized(source);associate(target,source)
+    with LOCK:
+        current=state();data=dict(current['data']);changed=False
+        for root in current['owners'].get(source,()):
+            entry=data[root];expected=entry.get('non_html',[])
+            if Path(urlsplit(source).path).suffix.lower() not in ('.js','.mjs','.css') and source not in expected:continue
+            if target==root or target in expected:continue
+            data[root]={**entry,'non_html':[*expected,target]};changed=True
+        if changed:commit(data)
 
 def false_css_dependencies(resources,mapping,archive):
     """Prove old false positives from archived styles; encoded # filenames remain valid."""
@@ -129,10 +151,55 @@ def false_css_dependencies(resources,mapping,archive):
         except OSError:continue
     return false-actual
 
+def false_redirect_dependencies(root,resources,mapping,archive):
+    """Remove only archived HTML subtrees reached by a script/style redirect."""
+    resources={normalized(value) for value in resources};landings=set();memo={}
+    def body(url):
+        if url not in memo:
+            p=urlsplit(url);row=find(mapping,p.hostname or '',p.path,p.query,lambda r:usable_body(r,archive,''))
+            result=None
+            if row and any(kind in row.get('content_type','') for kind in ('text/html','text/css')):
+                file=Path(archive)/row['key']
+                if file.stat().st_size<=8*1024*1024:
+                    data=file.read_bytes();ct=row.get('content_type','')
+                    if 'text/html' in ct and re.match(br'\s*<(?:!doctype|html)\b',data[:1024],re.I):result=(data,ct)
+                    elif 'text/css' in ct:result=(data,ct)
+            memo[url]=result
+        return memo[url]
+    for source in resources:
+        if Path(urlsplit(source).path).suffix.lower() not in ('.js','.mjs','.css'):continue
+        pending=[source];seen=set()
+        while pending and len(seen)<10:
+            value=pending.pop()
+            if value in seen:continue
+            seen.add(value)
+            for row in mapping.get(value,[]):
+                if 300<=row.get('status',0)<400 and row.get('location'):
+                    target=normalized(urljoin(value,row['location']))
+                    if target in resources and valid_url(target):pending.append(target)
+            if value in resources:
+                candidate=body(value)
+                if candidate and 'text/html' in candidate[1]:landings.add(value)
+    if not landings:return set()
+    def closure(seeds,stop,invalid=False):
+        seeds=set(seeds);pending=list(seeds);seen=set()
+        while pending and len(seen)<2000:
+            value=pending.pop()
+            if value in seen or (value in stop and not (invalid and value in seeds)) or value not in resources:continue
+            seen.add(value);candidate=body(value)
+            if candidate:
+                data,ct=candidate
+                # A JavaScript URL returning HTML cannot declare page dependencies.
+                if not invalid and 'text/html' in ct and Path(urlsplit(value).path).suffix.lower() in ('.js','.mjs','.css'):continue
+                pending.extend(normalized(target) for target in declared_targets(value,data,ct) if valid_url(target))
+        return seen
+    protected=closure([normalized(root)],set())
+    return closure(landings,protected,True)-protected
+
 def status(url,mapping,archive):
     with LOCK:entry=state()['data'].get(normalized(url),{})
     resources=entry.get('resources',[url]);missing=[];warnings=[]
-    bad=false_css_dependencies(resources,mapping,archive)&{normalized(v) for v in resources}
+    bad=(false_css_dependencies(resources,mapping,archive)|false_redirect_dependencies(url,resources,mapping,archive))&{normalized(v) for v in resources}
     if bad:
         # One durable migration; rebuilding INDEX also removes stale owners.
         global INDEX
@@ -143,12 +210,20 @@ def status(url,mapping,archive):
                 if entry['resources']!=stored.get('resources',[]):
                     data[root]=entry;save(FILE,data);INDEX=None
                 resources=entry['resources']
+    required=school_test_data.required(url,mapping,archive)
+    payload=school_test_data.archived(required,mapping,archive) if required else None
+    if payload:
+        assets={normalized(target) for target in school_test_data.assets(payload,url) if valid_url(target)}
+        associate_many((target,url) for target in assets)
+        resources=list(dict.fromkeys([*resources,*sorted(assets)]))
     for value in resources:
         p=urlsplit(value)
+        expected=Path(p.path).suffix.lower()
+        if bundled_assets.asset(p.hostname,p.path):continue
         row=None;target=value
         for _ in range(10):
             p=urlsplit(target)
-            row=find(mapping,p.hostname or '',p.path,p.query,lambda row:usable_body(row,archive,Path(p.path).suffix.lower()))
+            row=find(mapping,p.hostname or '',p.path,p.query,lambda row:usable_body(row,archive,expected or Path(p.path).suffix.lower()))
             if row:break
             redirect=find(mapping,p.hostname or '',p.path,p.query)
             if not redirect or not 300<=redirect.get('status',0)<400 or not redirect.get('location'):break
@@ -158,13 +233,25 @@ def status(url,mapping,archive):
             optional=optional_reason(value) if value!=url else ''
             if optional:warnings.append({'kind':'asset','url':value,'reason':'Няма потвърден годен файл в архива','severity':'warning','policy_reason':optional})
             else:missing.append(value)
-    return {'capture':True,'available':not missing and not entry.get('truncated',False),'limit_reached':entry.get('truncated',False),'total':len(resources),'missing':missing[:30],'warnings':warnings}
+    problem=''
+    if required and not payload:
+        if required not in missing:missing.append(required)
+        problem='Външният тест няма потвърден отговор с въпросите от tests.school.bg. Само HTML страницата и jQuery не са достатъчни.'
+    return {'problem':problem,'capture':True,'available':not missing and not entry.get('truncated',False),'limit_reached':entry.get('truncated',False),'total':len(resources),'missing':missing[:30],'warnings':warnings}
 
 def discover(url,data,content_type):
     """Track declared page/style dependencies even when iframe embedding is refused."""
     if 'text/html' not in content_type and 'text/css' not in content_type:return
     with LOCK:
-        if normalized(url) not in state()['owners']:return
+        current=state();owners=current['owners'].get(normalized(url),set())
+        if not owners:return
+        if 'text/html' in content_type:
+            if Path(urlsplit(url).path).suffix.lower() in ('.js','.mjs','.css') or school_test_data.test_number(url) is not None:return
+            owners={root for root in owners if normalized(url) not in current['data'][root].get('non_html',[])}
+            if not owners:return
+    associate_many(((target,url) for target in declared_targets(url,data,content_type)),roots_only=owners)
+
+def declared_targets(url,data,content_type):
     text=data.decode('utf-8',errors='replace');links=[];base=url
     if 'text/html' in content_type:
         from html.parser import HTMLParser
@@ -179,6 +266,8 @@ def discover(url,data,content_type):
                 if tag in ('script','img','iframe','source','video','audio','embed') and values.get('src'):links.append(values['src'])
                 if tag=='link' and values.get('rel','').lower() in ('stylesheet','preload','modulepreload') and values.get('href'):links.append(values['href'])
         parser=Dependencies();parser.feed(text);base=parser.base
-    if 'text/css' in content_type:
-        associate_many((target,url) for target in external_targets(text,url))
-    associate_many((urljoin(base,value),url) for value in links if value and not value.startswith(('#','data:','blob:')))
+    if 'text/css' in content_type:return external_targets(text,url)
+    targets={urljoin(base,value) for value in links if value and not value.startswith(('#','data:','blob:'))}
+    endpoint=school_test_data.endpoint(text) if 'text/html' in content_type else None
+    if endpoint:targets.add(endpoint)
+    return targets

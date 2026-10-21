@@ -25,6 +25,9 @@ def bundled_font(host,path):
 
 def asset(host,path):
     path=unquote(path)
+    if host in ('tests.school.bg','klett.bg') and path=='/assets/libraries/jquery-2.2.0/jquery-2.2.0.min.js':
+        script=Path(__file__).with_name('vendor')/'jquery/jquery-2.2.0.min.js'
+        return script if script.is_file() else None
     font=bundled_font(host,path)
     if font:return font
     if not _izzi_host(host):return None

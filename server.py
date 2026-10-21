@@ -419,6 +419,19 @@ class H(BaseHTTPRequestHandler):
             self.wfile.write(chunk);remaining-=len(chunk)
 
     def archive(self,m,host,path,q):
+        import school_test_data
+        if host in school_test_data.HOSTS and re.fullmatch(r'/api/tests/submit/\d+/?',path):
+            return self.sendb(b'Online grading is not available offline','text/plain',501)
+        if school_test_data.test_number('https://'+host+path) is not None:
+            params=parse_qs(q);callbacks=params.get('testrequest',[])
+            if callbacks and (len(callbacks)!=1 or not re.fullmatch(r'[A-Za-z_$][A-Za-z0-9_$]{0,127}',callbacks[0])):
+                return self.sendb(b'Invalid JSONP callback','text/plain',400)
+            data=school_test_data.archived('https://'+host+path,m,ARCHIVE_DIR)
+            if data:
+                encoded=json.dumps(data,ensure_ascii=True)
+                if callbacks:return self.sendb((callbacks[0]+'('+encoded+');').encode(),'application/javascript')
+                return self.sendb(encoded.encode(),'application/json')
+            return self.sendb(b'Archived test questions are unavailable','text/plain',404)
         if _izzi_host(host) and path.startswith('/__offline_capture__/'):
             return self.sendb(b'{"capture":false,"available":false}','application/json')
         context=book_ids(urlparse(self.headers.get("Referer","")).path)

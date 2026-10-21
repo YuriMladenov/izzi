@@ -92,6 +92,41 @@ class DependencyIndex(unittest.TestCase):
             mapping[css][0]['size']=len(text.encode())
             self.assertNotIn(fake,links.false_css_dependencies([css],mapping,archive))
 
+    def test_script_redirect_landing_does_not_pollute_app_and_repairs_old_index(self):
+        root='https://api.izzi.digital/datastore/blocks/9/index.html'
+        script='https://tests.school.bg/broken.js';redirect='https://klett.bg/broken.js';landing='https://klett.bg/'
+        junk='https://klett.bg/menu.png';needed='https://klett.bg/needed.svg'
+        links.register(root);links.associate(script,root)
+        links.associate_redirect(redirect,script);links.associate_redirect(landing,redirect)
+        links.discover(landing,b'<img src="/menu.png">','text/html')
+        self.assertNotIn(junk,links.state()['data'][root]['resources'])
+        # The same landing page remains a valid independently registered page.
+        links.register(landing);links.discover(landing,b'<img src="/menu.png">','text/html')
+        self.assertIn(junk,links.state()['data'][landing]['resources'])
+        self.assertNotIn(junk,links.state()['data'][root]['resources'])
+        archive=self.file.parent/'bodies';archive.mkdir();mapping={}
+        def add(url,body,ct='text/html',status=200,location=None):
+            key=str(len(mapping));(archive/key).write_bytes(body)
+            row={'key':key,'size':len(body),'body_available':True,'method':'GET','status':status,'content_type':ct}
+            if location:row['location']=location
+            mapping[url]=[row]
+        add(root,('<html><script src="'+script+'"></script><img src="'+needed+'"></html>').encode())
+        add(script,b'redirect',status=301,location=redirect);add(redirect,b'redirect',status=302,location=landing)
+        add(landing,b'<html><img src="/menu.png"><img src="/needed.svg"></html>')
+        save(self.file,{root:{'resources':[root,script,redirect,landing,junk,needed]}});links.INDEX=None
+        report=links.status(root,mapping,archive)
+        self.assertNotIn(junk,report['missing']);self.assertNotIn(landing,report['missing'])
+        self.assertIn(script,report['missing']);self.assertIn(needed,report['missing'])
+        self.assertNotIn(junk,links.state()['data'][root]['resources'])
+        # A server may return the unrelated landing HTML directly at a .js URL.
+        mapping[script][0].update(status=200,content_type='text/html')
+        body=b'<html><img src="https://klett.bg/menu.png"></html>'
+        (archive/mapping[script][0]['key']).write_bytes(body);mapping[script][0]['size']=len(body)
+        mapping[script][0].pop('location',None)
+        save(self.file,{root:{'resources':[root,script,junk,needed]}});links.INDEX=None
+        report=links.status(root,mapping,archive)
+        self.assertIn(script,report['missing']);self.assertNotIn(junk,report['missing'])
+
     def test_platform_home_does_not_attach_unrelated_catalog(self):
         root='https://bg.izzi.digital/explanation.html'
         links.register(root)

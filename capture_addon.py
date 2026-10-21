@@ -275,7 +275,7 @@ def _response(flow):
         print("[CACHE 304]",url);return
 
     if 300<=status<400 and flow.response.headers.get('location'):
-        external_links.associate(urljoin(url,flow.response.headers['location']),url)
+        external_links.associate_redirect(urljoin(url,flow.response.headers['location']),url)
     p=urlparse(url);ct=flow.response.headers.get("content-type","")
     is_mp4=p.path.lower().endswith(".mp4") or ct.lower().startswith("video/mp4")
     cr=flow.response.headers.get("content-range")
