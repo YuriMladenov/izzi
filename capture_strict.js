@@ -79,6 +79,7 @@ await new Promise(resolve=>setTimeout(resolve,250));
 /* Strict checks report a page failure instead of marking an unmounted lesson done. */
 }
 function captureResourceKey(value,base){
+if(typeof value!=='string'||!value.trim()||value.trim().startsWith('#'))return '';
 try{const u=new URL(String(value).replace(/\\+/g,'/'),base);u.hash='';u.searchParams.delete('__izzi_offline_recover');
 const id=/^(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)$/.test(u.hostname)?(u.searchParams.get('v')||u.pathname.match(/\/(?:embed|shorts|live)\/([\w-]{11})/)?.[1]||(u.hostname.endsWith('youtu.be')?u.pathname.slice(1):'')):'';
 if(id)return 'youtube:'+id;
@@ -87,7 +88,9 @@ return (/(^|\.)izzi\.digital$/.test(u.hostname)?'izzi':u.origin)+path;
 }catch{return '';}
 }
 function captureResourceTargets(frame,issue){
+if(issue.kind==='page')return [frame];
 const found=[],visited=new Set(),wanted=captureResourceKey(issue.url,issue.url);
+if(!wanted)return found;
 const walk=(doc,depth=0)=>{
 if(!doc||visited.has(doc)||depth>3)return;visited.add(doc);
 const nodes=doc.querySelectorAll('img,video,audio,source,iframe,a,script,link,block-image,block-video,block-audio,youtube-player,pkc,[style],[data-src],[data-original],[data-lazy-src]');
@@ -217,7 +220,7 @@ const status=document.createElement('p');status.className='status';status.setAtt
 const original=frame.style.cssText;const scale=Math.max(.2,Math.min(1,(window.innerWidth-420)/1280,(window.innerHeight-30)/900));
 Object.assign(frame.style,{right:'8px',bottom:'12px',transform:'scale('+scale+')',transformOrigin:'bottom right'});
 let closed=false,busy=false,marked=[];
-const clear=()=>{for(const item of marked){item.node.style.setProperty('outline',item.outline,item.outlinePriority);item.node.style.setProperty('outline-offset',item.offset,item.offsetPriority);item.node.removeEventListener('click',item.click,true);item.badge.remove();}marked=[];};
+const clear=()=>{for(const item of marked){item.node.style.setProperty('outline',item.outline,item.outlinePriority);item.node.style.setProperty('outline-offset',item.offset,item.offsetPriority);item.node.removeEventListener('click',item.click,true);item.badge?.remove();}marked=[];};
 const finish=action=>{if(closed)return;closed=true;clear();frame.style.cssText=original;host.remove();resolve(action);};
 const mark=(issue,click)=>{
 clear();let targets=captureResourceTargets(frame,issue);
@@ -225,9 +228,10 @@ if(!targets.length&&issue.kind==='page')targets=[frame];
 for(const node of targets){
 const item={node,outline:node.style.getPropertyValue('outline'),outlinePriority:node.style.getPropertyPriority('outline'),offset:node.style.getPropertyValue('outline-offset'),offsetPriority:node.style.getPropertyPriority('outline-offset'),click};
 node.style.setProperty('outline','4px solid #e02020','important');node.style.setProperty('outline-offset','3px','important');node.scrollIntoView({block:'center',inline:'nearest'});node.addEventListener('click',click,true);
+if(issue.kind==='page'){node.removeEventListener('click',click,true);marked.push(item);continue;}
 const badge=node.ownerDocument.createElement('button');badge.type='button';badge.textContent='↧ Изтегли отново';const rect=node.getBoundingClientRect();Object.assign(badge.style,{position:'fixed',left:Math.max(0,rect.left)+'px',top:Math.max(0,rect.top)+'px',zIndex:'2147483647',background:'#c52020',color:'white',border:'1px solid white',padding:'8px',font:'16px system-ui',cursor:'pointer'});badge.addEventListener('click',click);node.ownerDocument.body.appendChild(badge);item.badge=badge;marked.push(item);
 }
-status.textContent=targets.length?'Маркирани елементи: '+targets.length:'Няма видим елемент за този ресурс. Кликни върху причината за повторен опит.';
+status.textContent=issue.kind==='page'?'Проблемът е в проверката на целия урок. Използвай „Повтори проверката“.':targets.length?'Маркирани елементи: '+targets.length:'Няма видим елемент за този ресурс. Кликни върху причината за повторен опит.';
 };
 const buttons=document.createElement('div');buttons.className='buttons';panel.appendChild(buttons);
 const button=(text,action)=>{const node=document.createElement('button');node.type='button';node.textContent=text;node.addEventListener('click',action);buttons.appendChild(node);return node;};

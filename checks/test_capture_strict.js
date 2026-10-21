@@ -39,6 +39,9 @@ assert.equal(api.captureResourceKey(image.src,doc.baseURI),api.captureResourceKe
 assert.equal(api.captureResourceAssets(frame,lesson).length,1);
 const issue={kind:'image',url:image.src,reason:'Изображението не се зареди'};
 assert.equal(api.captureResourceTargets(frame,issue)[0],image);
+for(const empty of ['', ' ', undefined, null, '#section'])assert.equal(api.captureResourceKey(empty,doc.baseURI),'');
+assert.equal(api.captureResourceTargets(frame,{kind:'asset',url:doc.baseURI}).length,0,'missing srcset must not resolve to the lesson URL');
+assert.equal(api.captureResourceTargets(frame,{kind:'page',url:doc.baseURI})[0],frame,'page errors mark only the frame');
 let task=api.showCapturePause(frame,lesson,[issue],async(kind,url,extra)=>events.push({kind,extra}));
 let panel=doc.body.children.find(node=>!node.removed&&node.id==='izzi-offline-capture-pause');
 const reason=all(panel).find(node=>node.tagName==='BUTTON'&&node.textContent===issue.reason);reason.events.pointerenter();
@@ -48,7 +51,14 @@ confirmArchive=false;available=false;task=api.showCapturePause(frame,lesson,[iss
 for(const [label,result] of [['Продължи въпреки липсите','continue'],['Прекрати обхода','stop']]){
 task=api.showCapturePause(frame,lesson,[issue],async()=>{});panel=doc.body.children.find(node=>!node.removed&&node.id==='izzi-offline-capture-pause');all(panel).find(node=>node.tagName==='BUTTON'&&node.textContent===label).click();assert.equal(await task,result);
 }
-console.log('PASS: strict helper embedding, URL aliases, visible red marking, direct click recovery, archive confirmation, style restoration, continue and stop.');
+const pageIssue={kind:'page',url:lesson.href,reason:'Превъртането не достигна края'};
+task=api.showCapturePause(frame,lesson,[pageIssue],async()=>{});panel=doc.body.children.find(node=>!node.removed&&node.id==='izzi-offline-capture-pause');
+const pageButton=all(panel).find(node=>node.tagName==='BUTTON'&&node.textContent===pageIssue.reason);pageButton.events.pointerenter();
+assert.equal(frame.style.getPropertyValue('outline'),'4px solid #e02020');
+assert.equal(image.style.getPropertyValue('outline'),'1px dotted green');
+assert(!all(doc.body).some(node=>!node.removed&&node.textContent==='↧ Изтегли отново'),'page errors must not create download badges');
+await pageButton.click();assert.equal(await task,'retry');assert.equal(frame.style.getPropertyValue('outline'),'');
+console.log('PASS: strict helper embedding, URL aliases, visible red marking, direct click recovery, archive confirmation, style restoration, page-only marking, continue and stop.');
 }
 async function readiness(){
 const lesson=new URL('https://bg.izzi.digital/DOS/1/8.html');
