@@ -1,5 +1,7 @@
 """Explicit lesson links and the GET dependencies loaded through the capture proxy."""
 import ipaddress,re,threading
+from collections import OrderedDict
+from css_dependencies import external_targets,legacy_targets
 from urllib.parse import urlsplit,urljoin
 from pathlib import Path
 from config import STATE_DIR
@@ -9,6 +11,7 @@ from cache_bust_recovery import canonical_url
 FILE=STATE_DIR/'lesson_links.json'
 LOCK=threading.RLock()
 INDEX=None
+CSS_CACHE=OrderedDict()
 BLOCKED=('google-analytics.com','googletagmanager.com','youtube.com','youtube-nocookie.com','doubleclick.net')
 
 def valid_url(value):
@@ -99,9 +102,46 @@ def associate_many(pairs):
         except Exception:
             INDEX=None;raise
 
+def false_css_dependencies(resources,mapping,archive):
+    """Prove old false positives from archived styles; encoded # filenames remain valid."""
+    false=set();actual=set()
+    for value in set(resources):
+        p=urlsplit(value)
+        if Path(p.path).suffix.lower()!='.css':continue
+        row=find(mapping,p.hostname or '',p.path,p.query,lambda r:usable_body(r,archive,'.css'))
+        if not row:continue
+        path=Path(archive)/row['key']
+        try:
+            stat=path.stat()
+            if stat.st_size>8*1024*1024:continue
+            key=(value,str(path),stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns)
+            with LOCK:cached=CSS_CACHE.get(key)
+            if cached is None:
+                text=path.read_text(encoding='utf8',errors='replace')
+                good={normalized(url) for url in external_targets(text,value)}
+                old={normalized(url) for url in legacy_targets(text,value)}
+                cached=(old-good,good)
+                with LOCK:
+                    CSS_CACHE[key]=cached;CSS_CACHE.move_to_end(key)
+                    while len(CSS_CACHE)>128:CSS_CACHE.popitem(last=False)
+            false.update(cached[0]);actual.update(cached[1])
+        except OSError:continue
+    return false-actual
+
 def status(url,mapping,archive):
     with LOCK:entry=state()['data'].get(normalized(url),{})
     resources=entry.get('resources',[url]);missing=[]
+    bad=false_css_dependencies(resources,mapping,archive)&{normalized(v) for v in resources}
+    if bad:
+        # One durable migration; rebuilding INDEX also removes stale owners.
+        global INDEX
+        with LOCK:
+            current=state();root=normalized(url);stored=current['data'].get(root)
+            if stored:
+                data=dict(current['data']);entry={**stored,'resources':[v for v in stored.get('resources',[]) if normalized(v) not in bad]}
+                if entry['resources']!=stored.get('resources',[]):
+                    data[root]=entry;save(FILE,data);INDEX=None
+                resources=entry['resources']
     for value in resources:
         p=urlsplit(value)
         row=None;target=value
@@ -136,6 +176,5 @@ def discover(url,data,content_type):
                 if tag=='link' and values.get('rel','').lower() in ('stylesheet','preload','modulepreload') and values.get('href'):links.append(values['href'])
         parser=Dependencies();parser.feed(text);base=parser.base
     if 'text/css' in content_type:
-        links.extend(m[1].strip('"\' ') for m in re.finditer(r'url\(\s*([^)]*)\)',text))
-        links.extend(re.findall(r'@import\s+["\']([^"\']+)',text))
+        associate_many((target,url) for target in external_targets(text,url))
     associate_many((urljoin(base,value),url) for value in links if value and not value.startswith(('#','data:','blob:')))

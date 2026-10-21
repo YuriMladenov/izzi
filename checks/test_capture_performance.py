@@ -41,6 +41,57 @@ class DependencyIndex(unittest.TestCase):
         data=json.loads(self.file.read_text())[root]['resources']
         self.assertIn('https://bg.izzi.digital/datastore/blocks/657825/images/loading-icon.gif',data)
 
+    def test_css_tokens_skip_embedded_svg_strings_comments_and_local_fragments(self):
+        from css_dependencies import external_targets
+        root='https://api.izzi.digital/datastore/blocks/657825/assets/style.css'
+        css=r'''/* url(comment.png) */
+        .x{content:'url(string.png)';background:url("data:image/svg+xml,%3Csvg%3Eurl(%23SVGID_4_)%3C/svg%3E");
+        filter:url(#mask);mask:url('\23 mask');border-image:url(DATA:image/svg+xml,svg(url(%23nested)));}
+        @import /* note */ "theme.css";
+        .y{background:URL('../real.svg#symbol');mask:url(%23actual.svg);src:url(font.woff2?v=1#face)}
+        '''
+        targets=external_targets(css,root)
+        self.assertEqual({root.rsplit('/',1)[0]+'/theme.css',
+            'https://api.izzi.digital/datastore/blocks/657825/real.svg#symbol',
+            root.rsplit('/',1)[0]+'/%23actual.svg',root.rsplit('/',1)[0]+'/font.woff2?v=1#face'},targets)
+
+    def test_old_embedded_svg_dependencies_are_repaired_but_real_files_still_block(self):
+        import capture_completion as completion
+        from css_dependencies import legacy_targets
+        root='https://api.izzi.digital/datastore/blocks/657825/index.html'
+        css=root.rsplit('/',1)[0]+'/assets/style.css'
+        text='.x{background:url("data:image/svg+xml,%3Csvg%3Eurl(%23first)url(%23SVGID_4_)%3C/svg%3E")} .y{mask:url(%23actual.svg)}'
+        archive=self.file.parent/'archive';archive.mkdir();mapping={}
+        def add(url,body,content_type):
+            name=str(len(mapping))+'.bin';(archive/name).write_bytes(body)
+            mapping[url]=[{'key':name,'body_available':True,'status':200,'method':'GET','size':len(body),'decoded':True,'content_type':content_type}]
+        add(root,b'<html>app</html>','text/html');add(css,text.encode(),'text/css')
+        fake=css.rsplit('/',1)[0]+'/%23SVGID_4_';real=css.rsplit('/',1)[0]+'/%23actual.svg'
+        save(self.file,{root:{'resources':[root,css,*sorted(legacy_targets(text,css))]}})
+        with patch.object(links,'CSS_CACHE',links.OrderedDict()):
+            result=links.status(root,mapping,archive)
+            self.assertEqual([real],result['missing']);self.assertFalse(result['available'])
+            self.assertNotIn(fake,json.loads(self.file.read_text())[root]['resources'])
+            self.assertNotIn(fake,links.state()['owners'])
+            with patch.object(links,'save',side_effect=AssertionError('Repeated migration write')):
+                self.assertEqual([real],links.status(root,mapping,archive)['missing'])
+            lesson='https://bg.izzi.digital/DOS/888413/888428.html';add(lesson,b'<html>lesson</html>','text/html')
+            with patch.object(completion,'CURRENT',None):
+                completion.start(lesson)
+                for url in (root,css,fake,real):completion.expect(url,lesson)
+                completion.CURRENT['activity']-=2
+                self.assertEqual([real], [row['url'] for row in completion.status(lesson,[],mapping,archive)['missing']])
+                add(real,b'<svg xmlns="http://www.w3.org/2000/svg"></svg>','image/svg+xml')
+                self.assertTrue(links.status(root,mapping,archive)['available'])
+                self.assertTrue(completion.status(lesson,[],mapping,archive)['available'])
+            # The archived content is read once, then cache reused until changed.
+            with patch.object(Path,'read_text',side_effect=AssertionError('Unexpected reread')):
+                self.assertIn(fake,links.false_css_dependencies([css],mapping,archive))
+            text+='.z{mask:url(%23SVGID_4_)}'
+            (archive/mapping[css][0]['key']).write_bytes(text.encode())
+            mapping[css][0]['size']=len(text.encode())
+            self.assertNotIn(fake,links.false_css_dependencies([css],mapping,archive))
+
     def test_platform_home_does_not_attach_unrelated_catalog(self):
         root='https://bg.izzi.digital/explanation.html'
         links.register(root)

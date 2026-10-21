@@ -107,7 +107,7 @@ async function linkedApps(){
  assert(events.some(e=>e.kind==='youtube-checked'));
 }
 async function images(){
- const helper=source.slice(source.indexOf('async function captureLessonImages'),source.indexOf("await ping('book-start',location);"));
+ const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_resources.js'),'utf8');
  const urls=[],events=[];let archived=true;
  class Image{set src(value){urls.push(value);this.naturalWidth=100;queueMicrotask(()=>this.onload());}}
  const lesson=new URL('https://bg.izzi.digital/DOS/1/8.html');
@@ -122,6 +122,30 @@ async function images(){
  const failed=await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}));
  assert.equal(failed.failed,2);assert.equal(events.filter(x=>x.kind==='image-failed').length,2);
  assert(events.some(x=>x.extra.reason==='няма годен body в архива'));
+}
+async function scrollReadiness(){
+ const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_resources.js'),'utf8');
+ const lesson=new URL('https://bg.izzi.digital/DOS/888413/888434.html');
+ async function scenario({height,clamp=true,blocked=false,grow=false}){
+  const values=new Map([['scroll-behavior',['smooth','']],['scroll-snap-type',['y mandatory','important']]]);
+  const style={getPropertyValue:n=>values.get(n)?.[0]||'',getPropertyPriority:n=>values.get(n)?.[1]||'',setProperty:(n,v,p)=>values.set(n,[v,p]),removeProperty:n=>values.delete(n)};
+  const root={scrollHeight:height,clientHeight:899,scrollTop:0,style,outerHTML:''};let steps=0,grown=false;
+  const frame={contentDocument:{baseURI:lesson.href,documentElement:root,scrollingElement:root,body:{style},querySelectorAll:()=>[]},contentWindow:{location:lesson,innerHeight:900,scrollX:0,scrollY:0,scrollTo(x,y){
+    steps++;if(blocked)return;
+    assert.equal(style.getPropertyValue('scroll-behavior'),'auto');assert.equal(style.getPropertyValue('scroll-snap-type'),'none');
+    let top=Math.min(y,root.scrollHeight-root.clientHeight);if(clamp)top=Math.floor(top);root.scrollTop=Math.max(0,top);this.scrollY=root.scrollTop;
+    if(grow&&!grown&&root.scrollTop>=root.scrollHeight-root.clientHeight-2){grown=true;root.scrollHeight+=1000;}
+  }}};
+  const capture=vm.runInNewContext(helper+';captureLessonImages',{O:lesson.origin,document:{createElement:()=>({set innerHTML(v){this.value=v;}})},URL,URLSearchParams,AbortController,Date,console:{warn:()=>{}},setTimeout:(f,ms)=>{if(ms===500||ms===1000)queueMicrotask(f);return 1;},clearTimeout:()=>{},fetch:async()=>({ok:true,json:async()=>({available:true})})});
+  const result=await capture(frame,lesson,async()=>{});
+  assert.equal(style.getPropertyValue('scroll-behavior'),'smooth');assert.equal(style.getPropertyPriority('scroll-snap-type'),'important');
+  return {result,steps,grown};
+ }
+ assert.equal((await scenario({height:3000.75})).result.failed,0,'fractional bottom is reachable');
+ const long=await scenario({height:95000.25});assert.equal(long.result.failed,0,'long lesson exceeds the old 120-step budget');assert(long.steps>120);
+ const growing=await scenario({height:3000.75,grow:true});assert(growing.grown);assert.equal(growing.result.failed,0,'recheck height after lazy content expands');
+ const stuck=await scenario({height:3000,blocked:true});assert.equal(stuck.result.failed,1,'a genuinely stuck page must still block traversal');
+ assert(stuck.result.issues.some(row=>row.reason.startsWith('Превъртането не достигна края (0 / 2101 px)')));
 }
 async function attachments(){
  const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_resources.js'),'utf8');
@@ -152,4 +176,4 @@ async function media(){
  assert.equal((await capture(frame,lesson,async(kind,u,extra)=>events.push({kind,extra}))).failed,2);
  assert.equal(events.filter(e=>e.kind==='media-failed').length,2);
 }
-(async()=>{await media();await attachments();await images();await run(false);await navigation();await linkedApps();await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});
+(async()=>{await media();await attachments();await images();await scrollReadiness();await run(false);await navigation();await linkedApps();await run(true);console.log('PASS: valid shadow host, named lessons, skip checkboxes, cancellation and traversal selection.');})().catch(e=>{console.error(e);process.exitCode=1;});

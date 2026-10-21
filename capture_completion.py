@@ -59,6 +59,8 @@ def status(lesson,assets,mapping,archive):
         truncated=bool(current and current['truncated'])
     urls.add(canonical_url(lesson))
     urls.update(canonical_url(value) for value in assets if isinstance(value,str) and valid(value))
+    import external_links
+    urls-=external_links.false_css_dependencies(urls,mapping,archive)
     missing=[]
     for url in sorted(urls):
         p=urlsplit(url);ext=Path(p.path).suffix.lower()

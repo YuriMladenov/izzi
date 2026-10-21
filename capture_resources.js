@@ -12,9 +12,33 @@ return issues;
 }
 async function captureLessonImages(frame,lesson,ping,options={}){const doc=frame.contentDocument;if(!doc||frame.contentWindow.location.pathname!==lesson.pathname)throw new Error('Урокът не е достъпен в iframe: '+lesson.pathname);
 const win=frame.contentWindow,scrollRoot=doc.scrollingElement||doc.documentElement;
-const startX=win.scrollX||0,startY=win.scrollY||0;let scrollIncomplete=false;
-const wait=()=>new Promise(resolve=>setTimeout(resolve,500));try{win.scrollTo(0,0);await wait();let reached=false;for(let step=0;step<120;step++){const bottom=Math.max(0,scrollRoot.scrollHeight-win.innerHeight);
-const current=win.scrollY||0;if(current>=bottom){await wait();if(current>=Math.max(0,scrollRoot.scrollHeight-win.innerHeight)){reached=true;break;}}win.scrollTo(0,Math.min(bottom,current+Math.max(200,Math.floor(win.innerHeight*0.75))));await wait();}scrollIncomplete=!reached;}finally{win.scrollTo(startX,startY);}
+const startX=win.scrollX||0,startY=win.scrollY||0;let scrollIncomplete=false,scrollFailure='';
+const wait=()=>new Promise(resolve=>setTimeout(resolve,500));
+const styles=[];
+/* Disable CSS smooth scrolling/snapping only while collecting lazy resources. */
+for(const node of new Set([scrollRoot,doc.documentElement,doc.body]))if(node?.style){
+for(const name of ['scroll-behavior','scroll-snap-type']){styles.push([node,name,node.style.getPropertyValue(name),node.style.getPropertyPriority(name)]);node.style.setProperty(name,name==='scroll-behavior'?'auto':'none','important');}}
+const viewport=()=>Math.max(1,scrollRoot.clientHeight||win.innerHeight||900);
+const position=()=>Number.isFinite(scrollRoot.scrollTop)?scrollRoot.scrollTop:(win.scrollY||0);
+const bottom=()=>Math.max(0,scrollRoot.scrollHeight-viewport());
+try{
+win.scrollTo(0,0);await wait();let reached=false;
+const deadline=Date.now()+180000;
+for(let step=0;step<400&&Date.now()<deadline;step++){
+const current=position(),end=bottom();
+/* Firefox can clamp to an integer below a fractional layout height. */
+if(current>=end-2){
+await wait();
+if(position()>=bottom()-2){reached=true;break;}
+}
+win.scrollTo(0,Math.min(bottom(),position()+Math.max(200,Math.floor(viewport()*0.75))));await wait();
+}
+scrollIncomplete=!reached;
+if(scrollIncomplete)scrollFailure='Превъртането не достигна края ('+Math.round(position())+' / '+Math.ceil(bottom())+' px)';
+}finally{
+win.scrollTo(startX,startY);
+for(const [node,name,value,priority] of styles.reverse()){if(value)node.style.setProperty(name,value,priority);else node.style.removeProperty(name);}
+}
 const seen=new Map(),failed=new Map();let inline=0;
 const decode=text=>{const area=document.createElement('textarea');area.innerHTML=text;return area.value.replace(/\\u002[fF]/g,'/').replace(/\\\//g,'/').replace(/\\["']/g,'"');};
 const add=value=>{if(!value)return;if(/^(data:|blob:)/i.test(value)){inline++;return;}let url;try{url=new URL(value,doc.baseURI||lesson.href)}catch{return}if(!/\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(?:$|[?#])/i.test(url.href))return;if(!/^https?:$/.test(url.protocol))return;url.hash='';seen.set(url.href,url);};
@@ -26,7 +50,7 @@ const load=async url=>{if(!/(^|\.)izzi\.digital$/i.test(url.hostname)){if(await 
 const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);image.onload=null;image.onerror=null;error?reject(error):resolve()};
 const timer=setTimeout(()=>finish(new Error('image timeout')),20000);image.onload=()=>finish(image.naturalWidth>0?null:new Error('невалидно изображение'));image.onerror=()=>finish(new Error('изображението не се зареди'));
 const fresh=new URL(url.href);fresh.searchParams.set('__izzi_offline_recover',Date.now().toString(36)+'_'+attempt);image.src=fresh.href;});if(!await status(url))throw new Error('няма годен body в архива');failed.delete(url.href);return;}catch(error){reason=error.message;}}failed.set(url.href,reason);};if(!await status(lesson))throw new Error('HTML на урока не е записан в архива');let checked=new Set(),stable=0;for(let round=0;round<6&&stable<2;round++){discover();
-const pending=[...seen.values()].filter(url=>!checked.has(url.href));stable=pending.length?0:stable+1;let index=0;await Promise.all(Array.from({length:Math.min(4,pending.length)},async()=>{while(index<pending.length){const url=pending[index++];checked.add(url.href);await load(url);}}));await new Promise(resolve=>setTimeout(resolve,1000));}discover();for(const url of seen.values())if(!checked.has(url.href))failed.set(url.href,'появи се след проверката');if(scrollIncomplete){await ping('scroll-incomplete',lesson,{reason:'превъртането не достигна края'});}for(const [url,reason] of failed){console.warn('IZZI IMAGE MISSING',lesson.pathname,url,reason);await ping('image-failed',lesson,{asset:url,reason});}await ping('images-checked',lesson,{total:seen.size,failed:failed.size});return {total:seen.size,failed:failed.size+(scrollIncomplete?1:0),issues:[...[...failed].map(([url,reason])=>({kind:'image',url,reason})),...(scrollIncomplete?[{kind:'page',url:lesson.href,reason:'Превъртането не достигна края'}]:[])]};}
+const pending=[...seen.values()].filter(url=>!checked.has(url.href));stable=pending.length?0:stable+1;let index=0;await Promise.all(Array.from({length:Math.min(4,pending.length)},async()=>{while(index<pending.length){const url=pending[index++];checked.add(url.href);await load(url);}}));await new Promise(resolve=>setTimeout(resolve,1000));}discover();for(const url of seen.values())if(!checked.has(url.href))failed.set(url.href,'появи се след проверката');if(scrollIncomplete){await ping('scroll-incomplete',lesson,{reason:scrollFailure});}for(const [url,reason] of failed){console.warn('IZZI IMAGE MISSING',lesson.pathname,url,reason);await ping('image-failed',lesson,{asset:url,reason});}await ping('images-checked',lesson,{total:seen.size,failed:failed.size});return {total:seen.size,failed:failed.size+(scrollIncomplete?1:0),issues:[...[...failed].map(([url,reason])=>({kind:'image',url,reason})),...(scrollIncomplete?[{kind:'page',url:lesson.href,reason:scrollFailure}]:[])]};}
 function captureFileKey(url){return /\.ggb$/i.test(url.pathname)?'izzi'+url.pathname.replace(/^\/DOS\/\d+(?=\/datastore\/)/,'')+url.search:url.href;}
 function captureGgbCandidates(url){
 const result=[url];
