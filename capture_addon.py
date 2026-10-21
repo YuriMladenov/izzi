@@ -237,7 +237,8 @@ def datastore_fallback_url(url):
     if '\\' in decoded or any(part in ('.','..') for part in decoded.split('/')):return None
     block=re.fullmatch(r'/datastore/blocks/\d+/.+',path)
     worksheet=re.fullmatch(r'/datastore/\d+/(?:publication/\d+|shared)/files/.+\.ggb',path,re.I)
-    if not (block or worksheet):return None
+    picture=re.fullmatch(r'/datastore/\d+/(?:publication/\d+|shared)/pictures/.+\.(?:png|jpe?g|gif|webp|svg|avif|bmp|ico)',path,re.I)
+    if not (block or worksheet or picture):return None
     return urlunparse(('https','api.izzi.digital',path,p.params,p.query,''))
 
 def recover_datastore_response(flow):

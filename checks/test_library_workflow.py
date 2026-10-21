@@ -59,6 +59,19 @@ class LibraryWorkflow(unittest.TestCase):
         except urllib.error.HTTPError as error:response=error
         with response:return response.code,response.headers,response.read()
 
+    def test_picture_api_recovery_replays_both_original_path_forms(self):
+        path='/datastore/15/publication/449863/pictures/2023/01/03/0b8e656a120a406585bf71e1bccb5dc0_extracted.png'
+        png=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1cAAAAASUVORK5CYII=')
+        # The real bg 404 stays in the index; the API image supplies replay.
+        self.add(path,b'<html>Not found</html>',status=404)
+        self.add('https://api.izzi.digital'+path,png,content_type='image/png')
+        self.start_server()
+        for replay in (path,'/DOS/449863'+path,'/__host__/bg.izzi.digital'+path):
+            with self.subTest(path=replay):
+                code,headers,body=self.request(replay)
+                self.assertEqual(200,code);self.assertEqual('image/png',headers['Content-Type']);self.assertEqual(png,body)
+        self.assertEqual(([],[],1),server.current_missing([{'host':'bg.izzi.digital','path':path}],self.mapping))
+
     def test_legacy_school_test_requires_questions_and_replays_fresh_jsonp_callback(self):
         import external_links as links,school_test_data,capture_addon
         from types import SimpleNamespace
