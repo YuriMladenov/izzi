@@ -46,7 +46,9 @@ class Tasks:
         if capture_port_busy():
             raise ValueError(f'Порт {CAPTURE_PROXY_PORT} вече е зает. Ако capture_mode.bat работи, използвай него; спри го в неговия прозорец, преди да стартираш capture от WebUI.')
         executable=find_mitmdump()
-        return [executable,'--listen-host','127.0.0.1','-p',str(CAPTURE_PROXY_PORT),'-s',str(ROOT/'capture_addon.py')]
+        host=os.environ.get('IZZI_CAPTURE_HOST','127.0.0.1')
+        if host not in ('127.0.0.1','0.0.0.0'):raise ValueError('Invalid IZZI_CAPTURE_HOST')
+        return [executable,'--listen-host',host,'-p',str(CAPTURE_PROXY_PORT),'-s',str(ROOT/'capture_addon.py')]
     def start(self,name,command=None):
         if name not in ('capture','checks'):raise ValueError('Unknown task')
         with self.lock:

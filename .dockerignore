@@ -1,0 +1,17 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+archive
+state
+captures
+**/*.har
+**/*.har.*
+*.zip
+*.zip.*
+tools/pip-cache
+tools/mitmproxy
+vendor/geogebra
+vendor/geogebra-backups
+.env
+.env.*

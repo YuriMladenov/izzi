@@ -735,6 +735,17 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertIn('Почистването е блокирано',blocked);self.assertIn('Възстанови',blocked)
         self.assertNotIn('Потвърди преместването',blocked)
 
+    def test_capture_bind_host_for_container_and_default_local(self):
+        import operations,os
+        tasks=operations.Tasks()
+        with patch.object(operations,'capture_port_busy',return_value=False), patch.object(operations,'find_mitmdump',return_value='mitmdump'):
+            with patch.dict(os.environ,{'IZZI_CAPTURE_HOST':'0.0.0.0'}):
+                command=tasks.command('capture');self.assertEqual('0.0.0.0',command[command.index('--listen-host')+1])
+            with patch.dict(os.environ,{},clear=True):
+                command=tasks.command('capture');self.assertEqual('127.0.0.1',command[command.index('--listen-host')+1])
+            with patch.dict(os.environ,{'IZZI_CAPTURE_HOST':'--set=invalid'}):
+                with self.assertRaises(ValueError):tasks.command('capture')
+
     def test_operations_owned_process_lifecycle_and_log(self):
         import operations,time
         tasks=operations.Tasks()

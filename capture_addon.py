@@ -1,7 +1,7 @@
 import asyncio,hashlib,mimetypes,json,re,time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import urlparse,parse_qs,urljoin
+from urllib.parse import urlparse,parse_qs,urljoin,urlunparse,unquote
 from mitmproxy import http
 from config import *
 from import_har import load as load_json,save,metadata,RX,update_entry
@@ -211,8 +211,36 @@ def response(flow:http.HTTPFlow):
 
 def response_sync(flow):
     try:
-        with archive_db.read_session():_response(flow)
+        with archive_db.read_session():
+            _response(flow)
+            recover_datastore_response(flow)
     finally:capture_completion.finish(getattr(flow,'id',id(flow)))
+
+def datastore_fallback_url(url):
+    """Only known static datastore namespaces; never redirect login/API requests."""
+    p=urlparse(url)
+    try:
+        if p.scheme not in ('http','https') or p.hostname!=SOURCE_HOST or p.username or p.password or p.port not in (None,80,443):return None
+    except ValueError:return None
+    path=re.sub(r'^/DOS/\d+(?=/datastore/)','',p.path)
+    decoded=unquote(path)
+    if '\\' in decoded or any(part in ('.','..') for part in decoded.split('/')):return None
+    block=re.fullmatch(r'/datastore/blocks/\d+/.+',path)
+    worksheet=re.fullmatch(r'/datastore/\d+/(?:publication/\d+|shared)/files/.+\.ggb',path,re.I)
+    if not (block or worksheet):return None
+    return urlunparse(('https','api.izzi.digital',path,p.params,p.query,''))
+
+def recover_datastore_response(flow):
+    # Keep the real upstream failure in the archive, then let the browser fetch
+    # and archive the API response normally. No synthetic successful bodies.
+    if flow.request.method!='GET' or flow.response is None or flow.response.status_code not in (404,410,503):return
+    target=datastore_fallback_url(flow.request.pretty_url)
+    if not target:return
+    source=canonical_url(flow.request.pretty_url)
+    external_links.associate(target,source)
+    capture_completion.follow_redirect(source,target)
+    flow.response=http.Response.make(307,b'',{'Location':target,'Cache-Control':'no-store','X-IZZI-Datastore-Fallback':'1'})
+    print('[DATASTORE API RETRY]',canonical_url(target))
 
 def _response(flow):
     if flow.response is None or flow.response.headers.get("X-IZZI-Archive")=="1":return

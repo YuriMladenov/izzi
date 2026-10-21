@@ -30,6 +30,13 @@ def expect(url,lesson):
         if len(CURRENT['urls'])>=LIMIT and url not in CURRENT['urls']:CURRENT['truncated']=True;return False
         CURRENT['urls'].add(url);CURRENT['activity']=time.monotonic();return True
 
+def follow_redirect(source,target):
+    """Carry current-lesson ownership across an origin-only redirect Referer."""
+    if not valid(target):return False
+    with LOCK:
+        if not CURRENT or canonical_url(source) not in CURRENT['urls']:return False
+        return expect(target,CURRENT['lesson'])
+
 def watch(url,method,referer,identifier):
     if method!='GET' or not valid(url):return False
     url=canonical_url(url);referer=canonical_url(referer) if referer else ''

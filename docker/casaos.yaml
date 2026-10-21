@@ -1,0 +1,29 @@
+name: izzi
+services:
+  izzi:
+    image: izzi-library:local
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    ports:
+      - "8765:8765"
+      - "8877:8877"
+    environment:
+      IZZI_CAPTURE_HOST: "0.0.0.0"
+    volumes:
+      - /DATA/AppData/izzi/archive:/app/archive
+      - /DATA/AppData/izzi/state:/app/state
+      - /DATA/AppData/izzi/captures:/app/captures
+      - /DATA/AppData/izzi/mitmproxy:/root/.mitmproxy
+      - /DATA/AppData/izzi/geogebra:/app/vendor/geogebra
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+x-casaos:
+  title:
+    custom: IZZI Library
+  icon: https://icon.casaos.io/main/all/debian.png
+  port_map: "8765"
+  scheme: http
+  index: /

@@ -116,6 +116,50 @@ class Completion(unittest.TestCase):
         completion.finish('script');self.settled()
         self.assertTrue(completion.status(self.lesson,[],self.mapping,self.archive)['available'])
 
+    def test_failed_datastore_assets_retry_api_and_wait_for_usable_archive(self):
+        import external_links
+        source='https://bg.izzi.digital/DOS/888413/datastore/blocks/657825/jquery-3.2.1.min.js'
+        target='https://api.izzi.digital/datastore/blocks/657825/jquery-3.2.1.min.js'
+        app=source.rsplit('/',1)[0]+'/index.html'
+        self.add(app,b'<html>app</html>')
+        completion.expect(app,self.lesson)
+        completion.watch(source,'GET',app,'original')
+        flow=SimpleNamespace(id='original',request=http.Request.make('GET',source,headers={'Referer':app}),response=http.Response.make(503,b'origin unavailable',{'Content-Type':'text/plain'}))
+        def committed(path,key,mutate,default):mutate(self.mapping.setdefault(key,default))
+        with patch.multiple(capture_addon,ARCHIVE_DIR=self.archive,STATE_DIR=self.archive,URL_MAP_FILE=self.archive/'url_map.json'),patch.object(capture_addon,'observe'),patch.object(capture_addon,'update_entry',side_effect=committed),patch.multiple(external_links,FILE=self.archive/'links.json',INDEX=None):
+            external_links.register(app);external_links.associate(source,app)
+            capture_addon.response(flow)
+            self.assertEqual(503,self.mapping[source][0]['status'],'preserve the real origin error')
+            self.assertEqual(307,flow.response.status_code)
+            self.assertEqual(target,flow.response.headers['Location'])
+            self.assertIn(target,completion.CURRENT['urls'])
+            self.assertTrue(completion.watch(target,'GET','https://bg.izzi.digital/','api'))
+            self.settled();self.assertFalse(completion.status(self.lesson,[],self.mapping,self.archive)['available'])
+            flow=SimpleNamespace(id='api',request=http.Request.make('GET',target),response=http.Response.make(200,b'window.recovered=true;',{'Content-Type':'application/javascript'}))
+            capture_addon.response(flow)
+            self.settled();self.assertTrue(completion.status(self.lesson,[],self.mapping,self.archive)['available'])
+            self.assertTrue(external_links.status(app,self.mapping,self.archive)['available'])
+
+    def test_datastore_fallback_scope_and_api_failure_are_not_hidden(self):
+        paths=['/datastore/blocks/657825/GeoGebra/deployggb.js','/DOS/888413/datastore/blocks/657825/assets/style.css','/DOS/9/datastore/blocks/657825/images/loading-icon.gif','/datastore/15/publication/30521/files/2021/01/11/1610382881_b7_u5_lin_ur.ggb']
+        for path in paths:
+            source='https://bg.izzi.digital'+path+'?v=2&__izzi_offline_recover=test'
+            target=capture_addon.datastore_fallback_url(source)
+            self.assertTrue(target.startswith('https://api.izzi.digital/datastore/'))
+            self.assertTrue(target.endswith('?v=2&__izzi_offline_recover=test'))
+        for source in ['https://evil.example/datastore/blocks/1/a.js','https://bg.izzi.digital/api/login','https://bg.izzi.digital/datastore/blocks/1/%2e%2e/api','https://bg.izzi.digital/datastore/blocks/1/a%5cb','https://bg.izzi.digital/datastore/15/publication/1/files/test.exe']:
+            self.assertIsNone(capture_addon.datastore_fallback_url(source))
+        url='https://bg.izzi.digital/datastore/blocks/657825/variables.js'
+        with patch.object(capture_addon.external_links,'associate'):
+            for method,status,url in [('GET',200,url),('GET',403,url),('POST',404,url),('GET',404,'https://api.izzi.digital/datastore/blocks/657825/variables.js')]:
+                flow=SimpleNamespace(request=http.Request.make(method,url),response=http.Response.make(status,b'original'))
+                capture_addon.recover_datastore_response(flow)
+                self.assertEqual(status,flow.response.status_code)
+                self.assertEqual(b'original',flow.response.content)
+        api='https://api.izzi.digital/datastore/blocks/657825/variables.js'
+        self.add(api,b'unavailable',503);completion.expect(api,self.lesson);self.settled()
+        self.assertFalse(completion.status(self.lesson,[],self.mapping,self.archive)['available'])
+
     def test_api_queries_do_not_use_another_cached_response(self):
         other='https://api.izzi.digital/api/info?id=2';wanted='https://api.izzi.digital/api/info?id=1'
         self.add(other,b'{}');self.settled()
