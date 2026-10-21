@@ -12,6 +12,7 @@ setProperty(name,value){this.values[name]=value;}
 class Element{
 constructor(tag,doc){this.tagName=tag.toUpperCase();this.ownerDocument=doc;this.style=new Style();this.children=[];this.events={};this.attrs={};this.disabled=false;this.className='';}
 appendChild(node){this.children.push(node);return node;}
+replaceChildren(){this.children=[];}
 setAttribute(name,value){this.attrs[name]=value;}
 getAttribute(name){return this.attrs[name]||null;}
 get attributes(){return Object.entries(this.attrs).map(([name,value])=>({name,value}));}
@@ -76,4 +77,39 @@ for(const release of releases)release();issues=await task;
 assert.equal(issues.length,0);assert.equal(started[3],'links','wait for every parallel check before dependencies and final archive confirmation');
 console.log('PASS: fresh document navigation, Vue readiness, wrong-page rejection, parallel checks and archive barrier.');
 }
-run().then(readiness).catch(error=>{console.error(error);process.exitCode=1;});
+async function report(){
+const lesson=new URL('https://bg.izzi.digital/DOS/1/8.html'),requests=[];
+let available=false;
+const doc={createElement(tag){return new Element(tag,this);}};doc.body=new Element('body',doc);
+const context={document:doc,URL,URLSearchParams,AbortController,Map,Set,O:lesson.origin,Date,console,clearTimeout(){},setTimeout(fn,ms){if(ms===500)queueMicrotask(fn);return 1;},fetch:async value=>{const url=new URL(value);requests.push(url);if(url.pathname.endsWith('image_status'))return {ok:true,json:async()=>({capture:true,available})};if(url.pathname.endsWith('/event'))return {ok:true};return {blob:async()=>{available=true;}};}};
+const api=vm.runInNewContext(helper+';({showCaptureReport,rememberCaptureIssues,captureDeferredResources,checkDeferredResource})',context);
+const row={kind:'asset',url:'https://api.izzi.digital/exercise.js',reason:'HTTP 404'};
+api.rememberCaptureIssues(lesson,[row]);api.rememberCaptureIssues(lesson,[{kind:'asset',url:'https://api.izzi.digital/app.js.map',reason:'Missing',severity:'warning',policy_reason:'Diagnostic'}]);
+const task=api.showCaptureReport({},'Finished',async()=>{}),panel=doc.body.children[0];
+const buttons=label=>all(panel).filter(node=>node.tagName==='BUTTON'&&node.textContent===label);
+assert.equal(buttons('Провери файла').length,2);assert.equal(buttons('Провери урока отново').length,2);
+await buttons('Провери файла')[0].click();assert.equal(api.captureDeferredResources.values().next().value.confirmed,false);
+await buttons('Изтегли отново')[0].click();assert.equal(api.captureDeferredResources.values().next().value.confirmed,true);
+assert.equal(api.captureDeferredResources.size,2,'file confirmation must not mark the lesson complete or remove its review row');
+assert(requests.some(url=>url.searchParams.get('exact')==='1'));
+assert(requests.some(url=>url.hostname==='api.izzi.digital'&&url.searchParams.has('__izzi_offline_recover')));
+buttons('Затвори')[0].click();await task;assert(panel.removed);
+available=false;context.fetch=async()=>({ok:true,blob:async()=>{},json:async()=>({capture:true,available:false})});
+assert.equal(await api.checkDeferredResource({...row,lesson:lesson.href},true),false,'a successful network response without an archived body must fail');
+console.log('PASS: deferred report, independent checks/downloads, exact archive confirmation and explicit close.');
+}
+async function automaticRecovery(){
+const lesson=new URL('https://bg.izzi.digital/DOS/1/8.html'),asset='https://api.izzi.digital/exercise.js';let available=false,downloads=0;
+const doc={readyState:'complete',body:{},querySelector:()=>null,querySelectorAll:()=>[]};
+const frame={contentDocument:doc,contentWindow:{document:doc,location:lesson}};
+const context={URL,URLSearchParams,AbortController,Map,Set,O:lesson.origin,console,clearTimeout(){},setTimeout(fn,ms){if(ms===500)queueMicrotask(fn);return 1;},captureLessonImages:async()=>({issues:[]}),captureLessonFiles:async()=>({issues:[]}),captureLessonMedia:async()=>({issues:[]}),captureLessonLinks:async()=>({issues:[]}),fetch:async value=>{
+const url=new URL(value);if(url.pathname.endsWith('lesson_status'))return {ok:true,json:async()=>({capture:true,available,tracked:true,quiet_ms:1500,pending:[],missing:available?[]:[{kind:'asset',url:asset,reason:'Missing'}],warnings:[{kind:'asset',url:asset+'.map',severity:'warning',reason:'Missing map'}]})};
+if(url.pathname.endsWith('image_status'))return {ok:true,json:async()=>({capture:true,available})};
+if(url.pathname.endsWith('/event'))return {ok:true};downloads++;return {blob:async()=>{available=true;}};
+}};
+const api=vm.runInNewContext(helper+';({captureStrictChecks,captureDeferredResources})',context);
+const issues=await api.captureStrictChecks(frame,lesson,async()=>{},true);
+assert.equal(issues.length,0);assert.equal(downloads,1);assert.equal(api.captureDeferredResources.size,1);assert.equal(api.captureDeferredResources.values().next().value.severity,'warning');
+console.log('PASS: automatic asset recovery rechecks archive barrier and preserves optional warnings.');
+}
+run().then(readiness).then(report).then(automaticRecovery).catch(error=>{console.error(error);process.exitCode=1;});

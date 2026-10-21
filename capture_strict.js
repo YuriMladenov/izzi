@@ -1,4 +1,69 @@
 /* Strict completion, targeted recovery and visible resource markers. Embedded in the bookmarklet. */
+const captureDeferredResources=new Map();
+function rememberCaptureIssues(lesson,issues){
+for(const issue of issues)captureDeferredResources.set(lesson.href+'\n'+issue.url,{...issue,lesson:lesson.href});
+}
+async function checkDeferredResource(row,download=false){
+const large=/\.(?:mp4|mp3|webm|wav|ogg|m4a|zip|pdf|ggb)$/i.test(new URL(row.url).pathname);
+const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),download?(large?240000:30000):20000);
+try{
+const url=new URL(row.url);
+if(!['http:','https:'].includes(url.protocol))throw new Error('Неподдържан адрес');
+if(download){
+const register=await fetch(O+'/__offline_capture__/event?'+new URLSearchParams({kind:'link-register',url:row.lesson,asset:row.url}),{cache:'no-store',signal:controller.signal});
+if(!register.ok)throw new Error('Capture proxy отказа регистрацията');
+url.searchParams.set('__izzi_offline_recover',Date.now().toString(36));
+const response=await fetch(url.href,{mode:'no-cors',credentials:'include',cache:'no-store',signal:controller.signal});await response.blob();
+}
+for(let attempt=0;attempt<(download?6:1);attempt++){
+const response=await fetch(O+'/__offline_capture__/image_status?'+new URLSearchParams({url:row.url,exact:'1'}),{cache:'no-store',signal:controller.signal});
+if(!response.ok)throw new Error('Capture proxy е недостъпен');
+const state=await response.json();if(state.capture!==true)throw new Error('Нужен е работещ capture proxy');
+if(state.available===true)return true;
+if(download)await new Promise(resolve=>setTimeout(resolve,500));
+}
+return false;
+}finally{clearTimeout(timer);}
+}
+function showCaptureReport(frame,summary,ping){
+return new Promise(resolve=>{
+const host=document.createElement('div');host.id='izzi-offline-capture-report';
+Object.assign(host.style,{position:'fixed',inset:'16px',zIndex:'2147483647'});
+const shadow=host.attachShadow({mode:'open'}),style=document.createElement('style');
+style.textContent=':host{font:15px system-ui;color:#17212b}.panel{box-sizing:border-box;background:white;border:2px solid #475569;border-radius:12px;padding:20px;height:100%;overflow:auto;box-shadow:0 8px 32px #0005}button{font:inherit;padding:8px;margin:4px;cursor:pointer}button:disabled{opacity:.5}.row{border-top:1px solid #ddd;padding:12px 0;overflow-wrap:anywhere}.warning{color:#875b00}.required{color:#ad2020}p{line-height:1.5}';shadow.appendChild(style);
+const panel=document.createElement('div');panel.className='panel';shadow.appendChild(panel);
+const heading=document.createElement('h2');heading.textContent='Отчет от обхода';panel.appendChild(heading);
+const text=document.createElement('p');text.textContent=summary+' Несъществените липси са предупреждения. Съществените липси остават непълни до повторна проверка на урока.';panel.appendChild(text);
+const status=document.createElement('p');status.setAttribute('role','status');panel.appendChild(status);
+const controls=document.createElement('div');panel.appendChild(controls);
+const list=document.createElement('div');panel.appendChild(list);
+let busy=false;
+const button=(parent,label,action)=>{const node=document.createElement('button');node.type='button';node.textContent=label;node.addEventListener('click',action);parent.appendChild(node);return node;};
+const locked=async action=>{if(busy)return;busy=true;panel.querySelectorAll('button').forEach(node=>node.disabled=true);try{await action();}catch(error){status.textContent=error.message;}finally{busy=false;render();panel.querySelectorAll('button').forEach(node=>node.disabled=false);}};
+const render=()=>{
+list.replaceChildren();
+if(!captureDeferredResources.size){const empty=document.createElement('p');empty.textContent='Няма пропуснати ресурси в отчета.';list.appendChild(empty);}
+for(const [key,row] of captureDeferredResources){
+const item=document.createElement('div');item.className='row';list.appendChild(item);
+const title=document.createElement('strong');title.className=row.severity==='warning'?'warning':'required';title.textContent=(row.severity==='warning'?'Предупреждение: ':'Непълно: ')+(row.policy_reason||row.reason);item.appendChild(title);
+const detail=document.createElement('p');const name=typeof selectionMetadata!=='undefined'?selectionMetadata.get(new URL(row.lesson).pathname)?.name:'';detail.textContent=(name||row.lesson)+' — '+row.url+' — '+row.reason;item.appendChild(detail);
+if(!['page','link','youtube'].includes(row.kind)){
+button(item,'Провери файла',()=>locked(async()=>{row.confirmed=await checkDeferredResource(row);status.textContent=row.confirmed?'Файлът е наличен. Провери отново урока за окончателен резултат.':'Файлът още липсва в архива.';}));
+button(item,'Изтегли отново',()=>locked(async()=>{status.textContent='Изтегляне…';row.confirmed=await checkDeferredResource(row,true);status.textContent=row.confirmed?'Файлът е изтеглен и потвърден в архива.':'Няма годен файл след повторния опит.';}));
+}
+if(row.confirmed){const done=document.createElement('p');done.textContent='✓ Файлът е потвърден; остава проверката на урока.';item.appendChild(done);}
+button(item,'Провери урока отново',()=>locked(async()=>{
+status.textContent='Проверка на урока…';const lesson=new URL(row.lesson);
+await ping('lesson-start',lesson);const heartbeat=setInterval(()=>ping('lesson-active',lesson).catch(()=>{}),3000);
+try{await captureLoadLesson(frame,lesson);const issues=await captureStrictChecks(frame,lesson,ping,true);rememberCaptureIssues(lesson,issues);await ping(issues.length?'lesson-incomplete':'lesson-done',lesson);status.textContent=issues.length?'Урокът още има съществени липси.':'Урокът е проверен. Останалите предупреждения са в списъка.';}finally{clearInterval(heartbeat);}
+}));
+}
+};
+button(controls,'Запази отчета (JSON)',()=>{const blob=new Blob([JSON.stringify({created:new Date().toISOString(),summary,resources:[...captureDeferredResources.values()]},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='izzi-capture-report.json';panel.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);});
+button(controls,'Затвори',()=>{if(!busy){host.remove();resolve();}});
+render();document.body.appendChild(host);
+});
+}
 async function captureLoadLesson(frame,lesson){
 let previous;try{previous=frame.contentDocument;}catch{}
 /* A deleted archive cannot be repopulated from the browser's memory cache. */
@@ -56,7 +121,7 @@ let last;
 for(let attempt=0;attempt<20;attempt++){
 const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
 try{const response=await fetch(O+'/__offline_capture__/lesson_status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lesson:lesson.href,assets:captureResourceAssets(frame,lesson)}),cache:'no-store',signal:controller.signal});
-if(!response.ok)throw new Error('Capture proxy не потвърди пълнотата на урока');last=await response.json();if(last.capture!==true)throw new Error('Нужен е обновен capture proxy');if(last.available)return [];
+if(!response.ok)throw new Error('Capture proxy не потвърди пълнотата на урока');last=await response.json();if(last.capture!==true)throw new Error('Нужен е обновен capture proxy');rememberCaptureIssues(lesson,last.warnings||[]);if(last.available)return [];
 if((last.missing||[]).length&&!last.pending?.length&&last.quiet_ms>=1000)break;
 }finally{clearTimeout(timer);}
 await new Promise(resolve=>setTimeout(resolve,500));
@@ -112,6 +177,7 @@ await ping('resource-recovered',lesson,{asset:issue.url});
 }finally{clearTimeout(timer);}
 }
 async function captureStrictChecks(frame,lesson,ping,skipAvailable=typeof missingOnly!=='undefined'&&missingOnly){
+for(const [key,row] of captureDeferredResources)if(row.lesson===lesson.href)captureDeferredResources.delete(key);
 const issues=[];
 try{
 const doc=frame.contentDocument,app=doc?.querySelector?.('.app-main');
@@ -125,9 +191,16 @@ else issues.push({kind:'page',url:lesson.href,reason:result.reason.message});
 }
 try{const result=await captureLessonLinks(frame,lesson,ping,{skipAvailable});issues.push(...(result.issues||[]));}catch(error){issues.push({kind:'page',url:lesson.href,reason:error.message});}
 try{
-const missing=await captureArchiveBarrier(frame,lesson);
+let missing=await captureArchiveBarrier(frame,lesson);
+/* Other checks already retry images/media/apps; bound extra recovery of generic assets. */
+let recovered=false;
+for(const issue of missing.filter(row=>row.kind==='asset').slice(0,4)){
+try{if(await checkDeferredResource({...issue,lesson:lesson.href},true))recovered=true;}catch{}
+}
+if(recovered)missing=await captureArchiveBarrier(frame,lesson);
 for(const issue of missing){const existing=issues.find(row=>captureResourceKey(row.url,lesson.href)===captureResourceKey(issue.url,lesson.href));if(!existing)issues.push(issue);else if(issue.reason.startsWith('HTTP ')&&!existing.reason.includes('HTTP '))existing.reason+=' · '+issue.reason;}
 }catch(error){issues.push({kind:'page',url:lesson.href,reason:error.message});}
+rememberCaptureIssues(lesson,issues);
 return issues;
 }
 function showCapturePause(frame,lesson,issues,ping){

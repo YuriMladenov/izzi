@@ -5,6 +5,7 @@ from css_dependencies import external_targets,legacy_targets
 from urllib.parse import urlsplit,urljoin
 from pathlib import Path
 from config import STATE_DIR
+from resource_policy import optional_reason
 from import_har import load,save
 from replay_resolver import find,usable_body
 from cache_bust_recovery import canonical_url
@@ -130,7 +131,7 @@ def false_css_dependencies(resources,mapping,archive):
 
 def status(url,mapping,archive):
     with LOCK:entry=state()['data'].get(normalized(url),{})
-    resources=entry.get('resources',[url]);missing=[]
+    resources=entry.get('resources',[url]);missing=[];warnings=[]
     bad=false_css_dependencies(resources,mapping,archive)&{normalized(v) for v in resources}
     if bad:
         # One durable migration; rebuilding INDEX also removes stale owners.
@@ -153,8 +154,11 @@ def status(url,mapping,archive):
             if not redirect or not 300<=redirect.get('status',0)<400 or not redirect.get('location'):break
             target=urljoin(target,redirect['location'])
             if not valid_url(target):break
-        if not row:missing.append(value)
-    return {'capture':True,'available':not missing and not entry.get('truncated',False),'limit_reached':entry.get('truncated',False),'total':len(resources),'missing':missing[:30]}
+        if not row:
+            optional=optional_reason(value) if value!=url else ''
+            if optional:warnings.append({'kind':'asset','url':value,'reason':'Няма потвърден годен файл в архива','severity':'warning','policy_reason':optional})
+            else:missing.append(value)
+    return {'capture':True,'available':not missing and not entry.get('truncated',False),'limit_reached':entry.get('truncated',False),'total':len(resources),'missing':missing[:30],'warnings':warnings}
 
 def discover(url,data,content_type):
     """Track declared page/style dependencies even when iframe embedding is refused."""

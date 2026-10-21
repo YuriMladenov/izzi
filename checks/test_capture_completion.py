@@ -19,6 +19,30 @@ class Completion(unittest.TestCase):
         if content_range:row['content_range']=content_range
         self.mapping[url]=[row]
     def settled(self):completion.CURRENT['activity']-=2
+    def test_optional_missing_and_pending_resources_warn_without_blocking(self):
+        optional='https://bg.izzi.digital/app.js.map'
+        completion.watch(optional,'GET',self.lesson,'optional');self.settled()
+        result=completion.status(self.lesson,[],self.mapping,self.archive)
+        self.assertTrue(result['available']);self.assertEqual([],result['pending'])
+        self.assertEqual(optional,result['warnings'][0]['url'])
+        self.assertEqual('warning',result['warnings'][0]['severity'])
+        required='https://bg.izzi.digital/exercise.js'
+        result=completion.status(self.lesson,[required],self.mapping,self.archive)
+        self.assertFalse(result['available']);self.assertEqual(required,result['missing'][0]['url'])
+        self.add(optional,b'{"version":3}')
+        self.assertEqual([],completion.status(self.lesson,[],self.mapping,self.archive)['warnings'])
+
+    def test_linked_apps_share_optional_policy_but_root_is_required(self):
+        import external_links
+        optional='https://example.org/app.js.map';script='https://example.org/exercise.js'
+        entry={'resources':[self.lesson,optional]}
+        with patch.object(external_links,'state',return_value={'data':{self.lesson:entry}}):
+            result=external_links.status(self.lesson,self.mapping,self.archive)
+            self.assertTrue(result['available']);self.assertEqual(optional,result['warnings'][0]['url'])
+            entry['resources'].append(script)
+            self.assertEqual([script],external_links.status(self.lesson,self.mapping,self.archive)['missing'])
+        with patch.object(external_links,'state',return_value={'data':{}}):
+            self.assertFalse(external_links.status(optional,self.mapping,self.archive)['available'])
     def test_pending_nested_requests_and_missing_files_prevent_done(self):
         css='https://bg.izzi.digital/profil/style.css';font='https://api.izzi.digital/fonts/font.woff2'
         self.assertTrue(completion.watch(css,'GET',self.lesson,'css'))

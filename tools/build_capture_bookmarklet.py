@@ -14,4 +14,4 @@ for name,file in [('NAV','capture_navigation.js'),('LINKS','capture_links.js'),(
     prefix,remainder=source.split(start,1);_,suffix=remainder.split(end,1)
     helper=''.join((root/file).read_text(encoding='utf8').splitlines())
     source=prefix+start+helper+end+suffix
-path.write_text(''.join(source.splitlines())+'\n',encoding='utf8')
+path.write_text(''.join(source.splitlines())+'\n',encoding='utf8',newline='\n')

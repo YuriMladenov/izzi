@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 from replay_resolver import find,book_ids,_izzi_host,usable_body,belongs_to_lesson
+from resource_policy import optional_reason
 
 LESSON=re.compile(r'^/DOS/(\d+)/(\d+)\.html$')
 IMPORTANT={'.html','.js','.mjs','.css','.json','.svg','.png','.jpg','.jpeg','.webp','.gif',
@@ -36,6 +37,7 @@ def related(url,record,bid):
     return any(bid in book_ids(p) for p in paths)
 
 def important(url,observation,records):
+    if optional_reason(url):return False
     # Write-only API observations are not replay GET dependencies.
     if records and all(r.get('method','GET') not in ('GET','HEAD') for r in records):return False
     p=urlparse(url)

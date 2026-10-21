@@ -3,6 +3,8 @@ const source=fs.readFileSync(require('node:path').join(__dirname,'../auto_book_c
 class Element{
  constructor(tag){this.tag=tag;this.children=[];this.style={};this.listeners={};this.checked=false;this.disabled=false;this.attrs={};}
  appendChild(x){this.children.push(x);return x;}
+ replaceChildren(){this.children=[];}
+ querySelectorAll(selector){return all(this).filter(x=>selector==='button'&&x.tag==='button');}
  setAttribute(k,v){this.attrs[k]=v;}
  getAttribute(k){return this.attrs[k]||null;}
  addEventListener(k,f){this.listeners[k]=f;}
@@ -30,9 +32,13 @@ async function run(cancel){
  if(cancel){button('Отказ').click();await task;assert.equal(events.length,0);assert.equal(dialog.removed,true);return;}
  button('Пропусни всички').click();assert.equal(button('Стартирай обхода').disabled,true);
  button('Обходи всички').click();assert.equal(button('Стартирай обхода').disabled,false);
- inputs[1].checked=true;inputs[1].listeners.change();button('Стартирай обхода').click();await task;
+ inputs[1].checked=true;inputs[1].listeners.change();button('Стартирай обхода').click();
+ for(let tick=0;tick<2000&&!doc.getElementById('izzi-offline-capture-report');tick++)await Promise.resolve();
+ const report=doc.getElementById('izzi-offline-capture-report');assert(report,'completion report must open');
+ assert(all(report).some(x=>x.textContent==='Няма пропуснати ресурси в отчета.'));
+ all(report).find(x=>x.tag==='button'&&x.textContent==='Затвори').click();await task;
  assert.deepEqual(events.filter(x=>x.get('kind')==='lesson-start').map(x=>x.get('lesson')),['8']);
- assert.equal(dialog.removed,true);assert.equal(alerts.length,1);const iframe=body.children.find(x=>x.tag==='iframe');assert.equal(iframe.style.width,'1280px');assert.equal(iframe.style.height,'900px');assert(events.some(x=>x.get('kind')==='lesson-done'));assert(!events.some(x=>x.get('kind')==='lesson-incomplete'));
+ assert.equal(dialog.removed,true);assert.equal(alerts.length,0);const iframe=body.children.find(x=>x.tag==='iframe');assert.equal(iframe.style.width,'1280px');assert.equal(iframe.style.height,'900px');assert(events.some(x=>x.get('kind')==='lesson-done'));assert(!events.some(x=>x.get('kind')==='lesson-incomplete'));
 }
 async function navigation(){
  const helper=fs.readFileSync(require('node:path').join(__dirname,'../capture_navigation.js'),'utf8');
