@@ -1,7 +1,7 @@
-"""Build the self-contained Firefox bookmarklet from its readable helpers."""
+"""Build the proxy runtime and standalone fallback from readable helpers."""
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
-path=root/'auto_book_capture_bookmarklet.txt'
+path=root/'auto_book_capture_standalone.txt'
 source=path.read_text(encoding='utf8')
 legacy="const loadLesson=u=>new Promise(resolve=>{let done=false,timer;const finish=()=>{if(done)return;done=true;clearTimeout(timer);setTimeout(resolve,10000);};timer=setTimeout(finish,22000);f.onload=finish;f.src=u.href;});"
 source=source.replace(legacy,"const loadLesson=u=>captureLoadLesson(f,u);")
@@ -15,3 +15,8 @@ for name,file in [('NAV','capture_navigation.js'),('LINKS','capture_links.js'),(
     helper=''.join((root/file).read_text(encoding='utf8').splitlines())
     source=prefix+start+helper+end+suffix
 path.write_text(''.join(source.splitlines())+'\n',encoding='utf8',newline='\n')
+
+runtime=''.join(source.splitlines()).removeprefix('javascript:').strip()
+import hashlib
+revision=hashlib.sha256(runtime.encode('utf8')).hexdigest()[:12]
+(root/'capture_book_runtime.js').write_text('globalThis.__IZZI_CAPTURE_RUNTIME_LOADED__=true;globalThis.__IZZI_CAPTURE_VERSION__='+repr(revision)+';\n'+runtime+'\n',encoding='utf8',newline='\n')

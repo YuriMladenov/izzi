@@ -63,6 +63,16 @@ def request(flow:http.HTTPFlow):
 def _request(flow):
     global MISSING_ONLY,UPDATE_BOOK,UPDATE_UNTIL
     p=urlparse(flow.request.pretty_url)
+    if p.hostname==SOURCE_HOST and p.path=='/__offline_capture__/book_capture.js':
+        headers={'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}
+        if flow.request.method!='GET':
+            flow.response=http.Response.make(405,b'/* GET required */',{**headers,'Allow':'GET'});return
+        try:
+            body=Path(__file__).with_name('capture_book_runtime.js').read_bytes()
+            flow.response=http.Response.make(200,body,headers)
+        except OSError:
+            flow.response=http.Response.make(503,b'/* Runtime missing. Run tools/build_capture_bookmarklet.py. */',headers)
+        return
     if flow.request.headers.pop('X-IZZI-Resume',None):
         from video_resume import safe_url
         peer=getattr(flow.client_conn,'peername',None)

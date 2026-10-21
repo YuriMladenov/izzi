@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const source=fs.readFileSync(require('node:path').join(__dirname,'../auto_book_capture_bookmarklet.txt'),'utf8').replace(/^javascript:/,'');
+const source=fs.readFileSync(require('node:path').join(__dirname,'../auto_book_capture_standalone.txt'),'utf8').replace(/^javascript:/,'');
 class Element{
  constructor(tag){this.tag=tag;this.children=[];this.style={};this.listeners={};this.checked=false;this.disabled=false;this.attrs={};}
  appendChild(x){this.children.push(x);return x;}

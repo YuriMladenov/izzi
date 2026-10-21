@@ -1,7 +1,7 @@
 /* Resource mapping and pause controls, without a live site or browser dependency. */
 const assert=require('node:assert/strict'),fs=require('fs'),vm=require('node:vm'),path=require('node:path');
 const helper=fs.readFileSync(path.join(__dirname,'../capture_strict.js'),'utf8');
-const bookmark=fs.readFileSync(path.join(__dirname,'../auto_book_capture_bookmarklet.txt'),'utf8');
+const bookmark=fs.readFileSync(path.join(__dirname,'../auto_book_capture_standalone.txt'),'utf8');
 for(const [marker,file] of [['STRICT','capture_strict.js'],['RESOURCES','capture_resources.js']])assert.equal(bookmark.split('/*IZZI_'+marker+'_START*/')[1].split('/*IZZI_'+marker+'_END*/')[0],fs.readFileSync(path.join(__dirname,'../'+file),'utf8').split(/\r?\n/).join(''));
 class Style{
 constructor(){this.values={};this.cssText='original';}

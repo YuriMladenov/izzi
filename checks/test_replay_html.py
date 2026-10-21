@@ -16,6 +16,11 @@ class ReplayHTML(unittest.TestCase):
         with patch.object(server,'lesson_media',return_value=media or []):
             return server.inject_media_map(text.encode(),path).decode()
 
+    @unittest.skipUnless(shutil.which('node'),'Node.js required for loader runtime test')
+    def test_short_capture_loader(self):
+        result=subprocess.run(['node',str(Path(__file__).with_name('test_capture_loader.js'))],capture_output=True,text=True,timeout=20)
+        self.assertEqual(0,result.returncode,result.stdout+result.stderr)
+
     def test_listen_button_pauses_and_resumes_resolved_audio_url(self):
         # Original alt-audio method: assigning src resets playback to zero.
         method='''function(){var t=this.altAudio;1==dosData.isExport&&(t=this.altAudio.substring(1)),this.$player.duration>0&&!this.$player.paused&&this.$player.src.indexOf(t)>-1?(this.$player.pause(),this.isPlaying=!1):this.$player.duration>0&&this.$player.paused&&this.$player.src.indexOf(t)>-1?(this.$player.play(),this.isPlaying=!0,Ct.$emit("pause-others",{active:this._uid})):(this.$player.src=this.altAudio,this.$player.play(),this.isPlaying=!0,Ct.$emit("pause-others",{active:this._uid}))}'''

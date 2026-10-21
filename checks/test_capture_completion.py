@@ -206,6 +206,21 @@ class Completion(unittest.TestCase):
         self.add(api,b'<html>real API app</html>')
         self.assertTrue(confirmed(True))
 
+    def test_proxy_serves_current_runtime_without_upstream_or_archive(self):
+        url='https://bg.izzi.digital/__offline_capture__/book_capture.js?t=123'
+        flow=SimpleNamespace(request=http.Request.make('GET',url),response=None)
+        with patch.object(capture_addon,'load_json',side_effect=AssertionError('Runtime must not scan archive')):
+            capture_addon.request(flow)
+        self.assertEqual(200,flow.response.status_code)
+        self.assertEqual('no-store',flow.response.headers['Cache-Control'])
+        self.assertEqual('nosniff',flow.response.headers['X-Content-Type-Options'])
+        self.assertEqual(Path(capture_addon.__file__).with_name('capture_book_runtime.js').read_bytes(),flow.response.content)
+        flow.request=http.Request.make('POST',url);flow.response=None;capture_addon.request(flow)
+        self.assertEqual(405,flow.response.status_code)
+        flow.request=http.Request.make('GET',url);flow.response=None
+        with patch.object(Path,'read_bytes',side_effect=FileNotFoundError):capture_addon.request(flow)
+        self.assertEqual(503,flow.response.status_code)
+
     def test_proxy_status_endpoint_confirms_archive_and_rejects_invalid_request(self):
         flow=SimpleNamespace(request=http.Request.make('POST','https://bg.izzi.digital/__offline_capture__/lesson_status',content=json.dumps({'lesson':self.lesson,'assets':[]}).encode()),response=None)
         self.settled()
