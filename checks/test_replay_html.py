@@ -142,6 +142,21 @@ vm.altAudio='./datastore/other.mp3';component.play.call(vm);assert.equal(assignm
         self.assertEqual(0,result.returncode,result.stdout+result.stderr)
 
     @unittest.skipUnless(shutil.which('node'),'Node.js required for strict capture runtime test')
+    def test_flipbook_capture_runtime(self):
+        result=subprocess.run(['node',str(Path(__file__).with_name('test_capture_flipbook.js'))],
+                              text=True,capture_output=True,timeout=10,encoding='utf-8')
+        self.assertEqual(0,result.returncode,result.stdout+result.stderr)
+
+    def test_flipbook_reader_keeps_local_frame_and_image_paths(self):
+        script='pdfPages:function(){var t=this,e=this.$root.isExport?"":"/",n=this.isOpenInPreview?"":".";return this.pagesClientData};const frame={src:""+t.pagePrefix+e.id+(t.$root.isExport?".html":"")};'
+        rendered=server.rewrite(script.encode(),html_document=False).decode()
+        self.assertIn('e=""',rendered)
+        self.assertIn('src:""+t.pagePrefix+e.id+".html"',rendered)
+        self.assertNotIn('isExport?',rendered)
+        ordinary='const frame={src:e.id+(t.$root.isExport?".html":"")};'
+        self.assertEqual(ordinary,server.rewrite(ordinary.encode(),html_document=False).decode())
+
+    @unittest.skipUnless(shutil.which('node'),'Node.js required for strict capture runtime test')
     def test_strict_capture_runtime(self):
         result=subprocess.run(['node',str(Path(__file__).with_name('test_capture_strict.js'))],
                               text=True,capture_output=True,timeout=10,encoding='utf-8')

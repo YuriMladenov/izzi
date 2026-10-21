@@ -75,6 +75,12 @@ def rewrite(b,host=None,html_document=None):
            ("https:\\/\\/xapi.izzi.digital\\/","\\/__host__\\/xapi.izzi.digital\\/"),
            ("https://www.googletagmanager.com/gtm.js","/__offline__/gtag.js"))
     for a,c in pairs:t=t.replace(a,c)
+    if not html_document and 'pdfPages:function' in t and 'pagesClientData' in t:
+        # Offline lessons use the built-in reader (isExport=False), while the
+        # flipbook still needs captured .html frames and relative page images.
+        # Do not turn profile checks back on to obtain these export-only paths.
+        t=re.sub(r'\(([$\w]+)\.\$root\.isExport\?"\.html":""\)', '".html"',t)
+        t=re.sub(r'(pdfPages:function\(\)\{var [$\w]+=this,[$\w]+=)this\.\$root\.isExport\?"":"/"',r'\1""',t)
     if 'global-audio-player' in t and 'name:"alt-audio"' in t:
         # The browser resolves ./ and percent-encodes Cyrillic media URLs.
         # Compare resolved URLs, and allow pausing before metadata has loaded.

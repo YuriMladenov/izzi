@@ -179,13 +179,14 @@ else if(issue.kind==='image'&&node.style.backgroundImage)node.style.backgroundIm
 await ping('resource-recovered',lesson,{asset:issue.url});
 }finally{clearTimeout(timer);}
 }
-async function captureStrictChecks(frame,lesson,ping,skipAvailable=typeof missingOnly!=='undefined'&&missingOnly){
+async function captureStrictChecks(frame,lesson,ping,skipAvailable=typeof missingOnly!=='undefined'&&missingOnly,insideFlipbook=false){
 for(const [key,row] of captureDeferredResources)if(row.lesson===lesson.href)captureDeferredResources.delete(key);
 const issues=[];
 try{
 const doc=frame.contentDocument,app=doc?.querySelector?.('.app-main');
 if(!doc||frame.contentWindow?.location?.pathname!==lesson.pathname||(doc.readyState==='loading')||(app&&!app.classList?.contains('app-main--ready')))return [{kind:'page',url:lesson.href,reason:'Приложението на урока не завърши зареждането. Провери грешките и достъпа в оригиналния сайт.'}];
 }catch(error){return [{kind:'page',url:lesson.href,reason:error.message}];}
+if(!insideFlipbook&&typeof captureFlipbookPage==='function'&&frame.contentDocument.body?.getAttribute('data-page-template')==='pdf_page')return captureFlipbookPage(frame,lesson,ping,skipAvailable);
 if(typeof captureGeoGebra==='function')issues.push(...await captureGeoGebra(frame,lesson));
 const checks=await Promise.allSettled([captureLessonImages(frame,lesson,ping,{skipAvailable}),captureLessonFiles(frame,lesson,ping,{skipAvailable}),captureLessonMedia(frame,lesson,ping,{skipAvailable})]);
 for(const result of checks){

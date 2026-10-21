@@ -42,6 +42,8 @@ for(const [node,name,value,priority] of styles.reverse()){if(value)node.style.se
 const seen=new Map(),failed=new Map();let inline=0;
 const decode=text=>{const area=document.createElement('textarea');area.innerHTML=text;return area.value.replace(/\\u002[fF]/g,'/').replace(/\\\//g,'/').replace(/\\["']/g,'"');};
 const add=value=>{if(!value)return;if(/^(data:|blob:)/i.test(value)){inline++;return;}let url;try{url=new URL(value,doc.baseURI||lesson.href)}catch{return}if(!/\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(?:$|[?#])/i.test(url.href))return;if(!/^https?:$/.test(url.protocol))return;url.hash='';seen.set(url.href,url);};
+const pageMeta=typeof selectionMetadata!=='undefined'?selectionMetadata.get(lesson.pathname)?.flipbook:null;
+for(const value of [pageMeta?.image,pageMeta?.thumbnail])if(value)add(value);
 const discover=()=>{for(const node of doc.querySelectorAll('img,source,block-image')){if(node.currentSrc)add(node.currentSrc);for(const attr of ['src','data-src','data-original','data-lazy-src'])add(node.getAttribute(attr));for(const attr of ['srcset','data-srcset'])for(const part of (node.getAttribute(attr)||'').split(','))add(part.trim().split(/\s+/)[0]);}
 const text=decode(doc.documentElement.outerHTML);for(const match of text.matchAll(/<(?:img|block-image)\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi))add(match[1]);};
 const status=async url=>{const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const reply=await fetch(O+'/__offline_capture__/image_status?'+new URLSearchParams({url:url.href}),{cache:'no-store',signal:controller.signal});if(!reply.ok)throw new Error('Capture proxy не потвърди архива');

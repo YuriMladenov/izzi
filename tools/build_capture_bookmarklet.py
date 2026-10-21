@@ -9,7 +9,9 @@ if "f.id='izzi-offline-capture-frame'" not in source:
     source=source.replace("const f=document.createElement('iframe');Object.assign", "const f=document.createElement('iframe');f.id='izzi-offline-capture-frame';Object.assign")
     source=source.replace("globalThis.__IZZI_CAPTURE_ACTIVE__=false;})()", "document.getElementById('izzi-offline-capture-frame')?.remove();globalThis.__IZZI_CAPTURE_ACTIVE__=false;})()")
     source=source.replace("document.getElementById('izzi-offline-lesson-picker')?.remove();console.error", "document.getElementById('izzi-offline-lesson-picker')?.remove();document.getElementById('izzi-offline-capture-frame')?.remove();console.error")
-for name,file in [('NAV','capture_navigation.js'),('LINKS','capture_links.js'),('RESOURCES','capture_resources.js'),('STRICT','capture_strict.js')]:
+if '/*IZZI_FLIPBOOK_START*/' not in source:
+    source=source.replace('/*IZZI_NAV_START*/', '/*IZZI_FLIPBOOK_START*//*IZZI_FLIPBOOK_END*//*IZZI_NAV_START*/')
+for name,file in [('FLIPBOOK','capture_flipbook.js'),('NAV','capture_navigation.js'),('LINKS','capture_links.js'),('RESOURCES','capture_resources.js'),('STRICT','capture_strict.js')]:
     start,end=f'/*IZZI_{name}_START*/',f'/*IZZI_{name}_END*/'
     prefix,remainder=source.split(start,1);_,suffix=remainder.split(end,1)
     helper=''.join((root/file).read_text(encoding='utf8').splitlines())
