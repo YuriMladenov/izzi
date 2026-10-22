@@ -881,12 +881,8 @@ class H(BaseHTTPRequestHandler):
         return self.sendb(b'{"ok":true}','application/json')
 
     def videos_page(self):
-        import video_resume
         content='<h1>Недовършени видеа</h1><p>Проверка на наличните MP4 файлове и видео части. За довършване са нужни интернет и работещ capture proxy. Изтеглят се липсващите диапазони; наличните части се запазват.</p><p>При отказ за достъп отвори видеото в оригиналния урок с правилния профил във Firefox през capture proxy и опитай отново. Cookies и tokens се използват само в паметта на proxy и не се записват на диска. YouTube видеата се изтеглят чрез отделния YouTube механизъм.</p>'
-        try:
-            report=video_resume.inspect()
-            content+='<div id="video-resume" data-token="%s"><p id="video-message" role="status"></p><button id="videos-refresh">Провери отново</button> <button data-video="all" %s>Довърши всички</button> <button id="videos-stop" disabled>Спри изтеглянето</button><p id="videos-state" role="status"></p><div id="videos-list"></div><pre id="videos-log" class="task-log"></pre></div><script src="/__ui__/videos.js" defer></script>'%(html.escape(operations.tasks.token,quote=True),'disabled' if not report['videos'] or report['errors'] else '')
-        except (OSError,ValueError) as error:content+='<p class="empty">Проверката е блокирана: '+html.escape(str(error))+'</p>'
+        content+='<div id="video-resume" data-token="%s"><p id="video-message" role="status"></p><button id="videos-refresh">Провери отново</button> <button data-video="all" %s>Довърши всички</button> <button id="videos-stop" disabled>Спри изтеглянето</button><p id="videos-state" role="status">Проверка на архива…</p><div id="videos-list"></div><pre id="videos-log" class="task-log"></pre></div><script src="/__ui__/videos.js" defer></script>'%(html.escape(operations.tasks.token,quote=True),'disabled')
         return self.sendb(self.ui(content,'Недовършени видеа','videos').encode(),'text/html; charset=utf-8')
 
     def cleanup_page(self,p):

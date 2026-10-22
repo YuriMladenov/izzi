@@ -1,5 +1,6 @@
 """Shared URL-map resolution for HTTP replay and archive diagnostics."""
-import re,zipfile
+import re,zipfile,stat
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse,unquote
 
@@ -28,10 +29,24 @@ def complete_body(r,size=None):
 def usable_body(r,archive,ext=''):
     if not isinstance(r,dict) or not r.get('body_available') or not isinstance(r.get('key'),str) or not r['key']:return False
     blob=Path(archive)/r['key']
-    if not blob.is_file():return False
+    try:info=blob.stat()
+    except OSError:return False
+    if not stat.S_ISREG(info.st_mode):return False
     if r.get('status',200) not in (200,206):return False
-    if r.get('size') is not None and blob.stat().st_size!=r['size']:return False
-    if r.get('status')==206 and not complete_body(r,blob.stat().st_size):return False
+    if r.get('size') is not None and info.st_size!=r['size']:return False
+    if r.get('status')==206 and not complete_body(r,info.st_size):return False
+    if ext in {'.mp4','.mp3','.webm','.ogg','.m4a','.wav'} and str(r.get('content_type','')).split(';')[0].lower() in ('text/html','application/json'):
+        return False
+    identity=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+    return _valid_content(blob.absolute(),ext,identity)
+
+@lru_cache(maxsize=2048)
+def _valid_content(blob,ext,identity):
+    """Cache only content checks; existence and record completeness stay live.
+
+    Identity includes replacement, size and nanosecond timestamps. The cache
+    holds booleans, never file bodies or open file handles.
+    """
     if ext in {'.js','.mjs','.css'}:
         with blob.open('rb') as stream:header=stream.read(1024)
         if re.match(br'(?:\xef\xbb\xbf)?\s*<(?:!doctype\s+html|html|head|body)\b',header,re.I):return False
@@ -44,8 +59,6 @@ def usable_body(r,archive,ext=''):
     if ext in {'.woff','.woff2','.ttf','.otf'}:
         with blob.open('rb') as stream:magic=stream.read(4)
         if magic not in (b'wOF2',b'wOFF',b'OTTO',b'\x00\x01\x00\x00',b'ttcf',b'true'):return False
-    if ext in {'.mp4','.mp3','.webm','.ogg','.m4a','.wav'} and str(r.get('content_type','')).split(';')[0].lower() in ('text/html','application/json'):
-        return False
     if ext in {'.mp4','.mp3','.webm','.ogg','.m4a','.wav','.svg','.png','.jpg','.jpeg','.webp','.gif','.exe','.sb','.sb2','.sb3','.zip','.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx'}:
         with blob.open('rb') as stream:header=stream.read(1024)
         if not header or re.search(br'<(?:!doctype\s+html|html)\b',header,re.I):return False

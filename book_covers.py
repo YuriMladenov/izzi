@@ -32,6 +32,7 @@ def catalog_covers(mapping,archive,books):
     except (OSError,ValueError):return result
     data=payload.get('data',{}) if isinstance(payload,dict) else {}
     if not isinstance(data,dict):return result
+    resolved={}
     def thumbnail(thumbs,keys=('image1','image2')):
         if not isinstance(thumbs,dict):return ''
         for key in keys:
@@ -41,8 +42,9 @@ def catalog_covers(mapping,archive,books):
             if host not in (SOURCE,'api.izzi.digital') or parsed.scheme not in ('','http','https'):continue
             path=parsed.path
             if not path.startswith('/'):continue
-            row=find(mapping,host,path,parsed.query,lambda row:usable_body(row,archive,'.png'))
-            if row:return '/__host__/'+host+quote(path,safe='/:%')+('?' + parsed.query if parsed.query else '')
+            key=(host,path,parsed.query)
+            if key not in resolved:resolved[key]=bool(find(mapping,host,path,parsed.query,lambda row:usable_body(row,archive,'.png')))
+            if resolved[key]:return '/__host__/'+host+quote(path,safe='/:%')+('?' + parsed.query if parsed.query else '')
         return ''
     def add(publication,group=None):
         if not isinstance(publication,dict):return

@@ -53,6 +53,14 @@ class AdminAccess(unittest.TestCase):
         self.assertEqual(403,self.request('/__operations__',cookie=cookie,host='other.local')[0])
         record=json.loads((self.state/'admin_account.json').read_text(encoding='utf8'))
         self.assertNotIn('password',record);self.assertNotIn('izzi',record.values())
+    def test_video_page_opens_without_synchronous_archive_scan(self):
+        self.start()
+        with patch('video_resume.inspect',side_effect=AssertionError('Page must defer archive inspection')):
+            status,_,body=self.request('/__videos__',host='localhost')
+        self.assertEqual(200,status)
+        self.assertIn('data-video="all" disabled',body)
+        self.assertIn('/__ui__/videos.js',body)
+        self.assertIn('Проверка на архива',body)
     def test_csrf_wrong_credentials_and_logout(self):
         self.start()
         self.assertEqual(401,self.login('wrong')[0])

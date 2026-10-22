@@ -1,9 +1,11 @@
 (()=>{
 const root=document.getElementById('video-resume');if(!root)return;
 const message=document.getElementById('video-message'),list=document.getElementById('videos-list');
-let busy=false,running=false;
+let busy=false,running=false,refreshing=false;
 const labels={idle:'Готово за изтегляне',running:'Изтеглянето работи',success:'Изтеглянето приключи',failed:'Има недовършени видеа или грешки — виж отчета',stopped:'Изтеглянето е спряно'};
 async function refresh(){
+if(refreshing)return;
+refreshing=true;
 try{
 const r=await fetch('/__videos__/status',{cache:'no-store'});if(!r.ok)throw new Error('Проверката е недостъпна');
 const data=await r.json();running=data.job.state==='running';
@@ -20,7 +22,7 @@ const button=document.createElement('button');button.dataset.video=video.id;butt
 }
 root.querySelector('[data-video="all"]').disabled=busy||running||!data.report.videos.length||!!data.report.errors.length;
 document.getElementById('videos-stop').disabled=busy||!running;
-}catch(error){message.textContent=error.message;}}
+}catch(error){message.textContent=error.message;}finally{refreshing=false;}}
 async function action(action,id='all'){
 busy=true;root.querySelectorAll('button').forEach(button=>button.disabled=true);message.textContent='Изпълнява се…';
 try{const r=await fetch('/__videos__/action',{method:'POST',headers:{'Content-Type':'application/json','X-IZZI-Control':root.dataset.token},body:JSON.stringify({action,id})});const data=await r.json();if(!r.ok)throw new Error(data.error||'Грешка');message.textContent=action==='stop'?'Спира след текущата заявка. Записаните части остават.':'Изтеглянето е стартирано.';}
