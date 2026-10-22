@@ -15,7 +15,7 @@ try {
     $expected = ([System.Security.Principal.NTAccount]$Account).Translate([System.Security.Principal.SecurityIdentifier]).Value
     $actual = ([System.Security.Principal.NTAccount]$credential.UserName).Translate([System.Security.Principal.SecurityIdentifier]).Value
     if ($expected -ne $actual) { throw 'Use the current project Windows account.' }
-    $action = New-ScheduledTaskAction -Execute $PythonExe -Argument ('-u "' + $launcher + '" --capture') -WorkingDirectory $ProjectRoot
+    $action = New-ScheduledTaskAction -Execute $PythonExe -Argument ('-u "' + $launcher + '"') -WorkingDirectory $ProjectRoot
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $trigger.Delay = 'PT30S'
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)

@@ -81,11 +81,11 @@ class ContainerSeed(unittest.TestCase):
             self.assertEqual('private',(root/'state/data').read_text())
 
 class Launcher(unittest.TestCase):
-    def test_restart_exit_code_starts_updated_server_and_preserves_capture_setting(self):
+    def test_restart_starts_library_only_even_with_legacy_capture_settings(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td);shutil.copyfile(maintenance.ROOT/'project_launcher.py',root/'project_launcher.py')
-            (root/'server.py').write_text("import os,sys\nfrom pathlib import Path\np=Path('runs')\nn=int(p.read_text())+1 if p.exists() else 1\np.write_text(str(n))\nassert os.environ['IZZI_MANAGED_LAUNCH']=='1'\nassert os.environ['IZZI_START_CAPTURE']=='1'\nsys.exit(75 if n==1 else 0)\n")
-            result=subprocess.run([sys.executable,str(root/'project_launcher.py'),'--capture'],cwd=root,capture_output=True,timeout=15)
+            (root/'server.py').write_text("import os,sys\nfrom pathlib import Path\np=Path('runs')\nn=int(p.read_text())+1 if p.exists() else 1\np.write_text(str(n))\nassert os.environ['IZZI_MANAGED_LAUNCH']=='1'\nassert 'IZZI_START_CAPTURE' not in os.environ\nsys.exit(75 if n==1 else 0)\n")
+            result=subprocess.run([sys.executable,str(root/'project_launcher.py'),'--capture'],cwd=root,capture_output=True,timeout=15,env={**os.environ,'IZZI_START_CAPTURE':'1'})
             self.assertEqual(0,result.returncode,result.stderr);self.assertEqual('2',(root/'runs').read_text())
 
 if __name__=='__main__':unittest.main()

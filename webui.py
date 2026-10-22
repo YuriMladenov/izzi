@@ -31,6 +31,6 @@ def book_card(book_id,title,cover='',decoration='',palette='',publisher=''):
     image='<img class="original-cover" src="'+html.escape(cover,quote=True)+'" alt="" loading="lazy" width="108" height="140">' if cover else ''
     decor='<img class="cover-decoration" src="'+html.escape(decoration,quote=True)+'" alt="" loading="lazy" width="108" height="140">' if decoration else ''
     palette=palette if re.fullmatch(r'palette(?:[0-9]|[1-4][0-9]|5[0-2])',palette) else ''
-    return ('<li data-search-item class="catalog-book"><a class="book-open" href="/__book__/'+bid+'">'
+    return ('<li data-search-item data-search-text="'+bid+'" class="catalog-book"><a class="book-open" href="/__book__/'+bid+'">'
             '<div class="book-thumbnail '+palette+('' if cover else ' no-cover')+'"><span class="cover-tile" aria-hidden="true"></span>'+image+decor+icon+'</div>'
-            '<h3>'+title+'</h3><p class="book-publisher">'+html.escape(publisher or 'не е посочено')+'</p><small>ID '+bid+'</small></a></li>')
+            '<h3>'+title+'</h3><p class="book-publisher">'+html.escape(publisher or 'не е посочено')+'</p></a></li>')

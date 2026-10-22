@@ -5,7 +5,8 @@ from pathlib import Path
 def main():
     root=Path(__file__).resolve().parent
     env={**os.environ,'IZZI_MANAGED_LAUNCH':'1','PYTHONUNBUFFERED':'1','PYTHONUTF8':'1'}
-    if '--capture' in sys.argv:env['IZZI_START_CAPTURE']='1'
+    # Old scheduled tasks may still pass --capture; startup is now library-only.
+    env.pop('IZZI_START_CAPTURE',None)
     stopping=False;child=None
     def stop(signum,frame):
         nonlocal stopping

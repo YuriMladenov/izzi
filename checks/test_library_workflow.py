@@ -949,7 +949,10 @@ class LibraryWorkflow(unittest.TestCase):
         self.add('/DOS/1/10.html')
         self.start_server();text=self.request('/')[2].decode()
         self.assertEqual(2,text.count('<h3>Same title</h3>'))
-        self.assertIn('ID 1',text);self.assertIn('ID 2',text)
+        self.assertNotIn('<small>ID ',text)
+        for bid in ('1','2'):
+            self.assertIn('data-search-text="'+bid+'"',text)
+            self.assertIn('href="/__book__/'+bid+'"',text)
         self.assertIn('1 с наличен HTML',self.request('/__book__/1')[2].decode());self.assertIn('0 с наличен HTML',self.request('/__book__/2')[2].decode())
         self.assertIn('data:,',text)
 

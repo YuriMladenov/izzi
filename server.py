@@ -866,7 +866,7 @@ class H(BaseHTTPRequestHandler):
     def maintenance_page(self):
         content='<h1>Поддръжка на проекта</h1><div id="maintenance" data-token="'+html.escape(operations.tasks.token,quote=True)+'"><section id="update"><h2>Обновяване от GitHub</h2><p>Изтегля последните промени за текущия клон main или WebUI. Спри capture, проверките и изтеглянето на видеа. Локални промени и промени на зависимости блокират обновяването.</p><button data-maintenance="update">Провери и обнови от GitHub</button> <button data-maintenance="restart" disabled>Рестартирай библиотеката</button><p id="update-state" role="status"></p><pre id="update-log" class="task-log"></pre></section><section id="startup"><h2>Стартиране с Windows</h2>'
         if os.name=='nt' and self.control_local():
-            content+='<p>Създава задача преди входа в Windows под текущия потребител на сървъра. Ще се отворят UAC и системен прозорец за Windows паролата (не PIN). Задачата стартира библиотеката и capture 30 секунди след зареждане на Windows.</p><button data-maintenance="startup">Създай / обнови Windows задача</button>'
+            content+='<p>Създава задача преди входа в Windows под текущия потребител на сървъра. Ще се отворят UAC и системен прозорец за Windows паролата (не PIN). Задачата стартира само библиотеката 30 секунди след зареждане на Windows.</p><button data-maintenance="startup">Създай / обнови Windows задача</button>'
         elif os.name=='nt':content+='<p>За създаване на задачата отвори тази страница на Windows компютъра през http://127.0.0.1:8765/.</p>'
         else:content+='<p>Task Scheduler е наличен само на Windows. Docker контейнерът използва restart: unless-stopped.</p>'
         content+='<p id="startup-state" role="status"></p></section><p id="maintenance-message" role="status"></p></div><script src="/__ui__/maintenance.js" defer></script>'
@@ -1040,9 +1040,6 @@ if __name__=="__main__":
     print(f"Listening on {HOST}:{PORT}; LAN access: http://<computer IPv4>:{PORT}/")
     try:
         RUNNING_SERVER=ThreadingHTTPServer((HOST,PORT),H)
-        if os.environ.get('IZZI_START_CAPTURE')=='1' and not operations.capture_port_busy():
-            try:operations.tasks.start('capture')
-            except (OSError,ValueError) as error:print('[STARTUP CAPTURE]',error)
         RUNNING_SERVER.serve_forever()
     finally:
         import video_resume
