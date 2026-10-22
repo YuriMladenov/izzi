@@ -7,7 +7,8 @@ SOURCE='bg.izzi.digital'
 def publisher_name(*sources):
     for source in sources:
         value=source.get('publisher') if isinstance(source,dict) else None
-        if isinstance(value,str) and value.strip():return value.strip()
+        if isinstance(value,str) and value.strip():
+            return re.sub(r'^Клет\s+България\s*[-–—]\s*(?=\S)','',value.strip(),flags=re.I)
     return ''
 
 def grade_number(title,publication=None):

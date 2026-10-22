@@ -884,21 +884,21 @@ class LibraryWorkflow(unittest.TestCase):
 
     def test_book_publishers_use_catalogue_and_group_and_escape_html(self):
         self.write('books.json',{str(i):{'title':'Учебник '+str(i),'lessons':{}} for i in range(1,5)})
-        payload={'data':{'grouped':[{'publisher':'Групово издателство','publications':[
-            {'dos_id':1,'publisher':'Клет България & <Анубис>'},{'dos_id':2}]}],
+        payload={'data':{'grouped':[{'publisher':'Клет България - Булвест 2000','publications':[
+            {'dos_id':1,'publisher':' Клет България – Анубис & <партньори>'},{'dos_id':2}]}],
             'ungrouped':{'publications':[{'dos_id':3,'publisher':'Просвета'}]}}}
         self.add('/api/online-bookshelf-publications',json.dumps(payload).encode(),content_type='application/json')
         self.start_server();page=self.request('/')[2].decode()
-        self.assertIn('<h3>Учебник 1</h3><p class="book-publisher">Издателство: Клет България &amp; &lt;Анубис&gt;</p>',page)
-        self.assertIn('Издателство: Групово издателство',page)
-        self.assertIn('Издателство: Просвета',page)
-        self.assertIn('Издателство: не е посочено',page)
+        self.assertIn('<h3>Учебник 1</h3><p class="book-publisher">Анубис &amp; &lt;партньори&gt;</p>',page)
+        self.assertIn('<p class="book-publisher">Булвест 2000</p>',page)
+        self.assertIn('<p class="book-publisher">Просвета</p>',page)
+        self.assertIn('<p class="book-publisher">не е посочено</p>',page)
         self.assertEqual(4,page.count('class="book-publisher"'))
 
     def test_publisher_metadata_works_without_captured_catalogue(self):
         self.write('books.json',{'1':{'title':'Учебник','publisher':'Записано издателство','lessons':{}}})
         self.start_server();page=self.request('/')[2].decode()
-        self.assertIn('Издателство: Записано издателство',page)
+        self.assertIn('<p class="book-publisher">Записано издателство</p>',page)
 
     def test_lan_is_reader_only_even_with_direct_admin_urls(self):
         self.write('books.json',{'1':{'title':'Book','lessons':{'2':{'title':'Lesson','path':'/DOS/1/2.html'}}}})
