@@ -68,4 +68,28 @@ async function run(){
  assert.equal((await activate(geoFrame,lesson)).length,0);await activate(geoFrame,lesson);assert.equal(clicks,1);
  console.log('PASS: hidden .ggb configs, datastore paths, no foreign hosts, archive confirmation, reuse and missing-engine pause.');
 }
-run().catch(error=>{console.error(error);process.exitCode=1;});
+async function componentBinding(){
+ const lesson=new URL('https://bg.izzi.digital/DOS/449527/449779.html');
+ const old='/datastore/15/publication/4033/files/2019/11/12/1573547071_1569840746_1569840539_1569406914_1567105534_Usp_vis_OK.ggb';
+ const current='/datastore/15/publication/4033/files/2020/04/29/1588167488_b5_u104_usp_vis.ggb';
+ const second='/datastore/15/publication/4033/files/2019/11/12/1573547071_1569840747_1569840539_1569406914_1567059109_a5mat178_1_OK.ggb';
+ const make=(id,file)=>({__vue__:{conf:{filename:{path:file,src:file}}},getAttribute:name=>name==='block-id'?id:null});
+ const first=make('8470030',old.replace('/datastore/','')),other=make('8470039',second),requested=[];
+ const frame={contentDocument:{baseURI:lesson.href,querySelectorAll:s=>s.startsWith('geogebra,')?[first,other]:[],documentElement:{outerHTML:JSON.stringify([old,second,current])}},contentWindow:{fetch:async value=>{requested.push(new URL(value));return {blob:async()=>({})};}}};
+ const context={O:lesson.origin,document:{createElement:()=>({set innerHTML(v){this.value=v;}})},URL,URLSearchParams,AbortController,console:{warn(){}},clearTimeout(){},setTimeout(fn,ms){if(ms===500)queueMicrotask(fn);return 1;},fetch:async value=>{const url=new URL(value);return {ok:true,json:async()=>url.pathname.endsWith('geogebra_status')?{installed:true}:{available:new URL(url.searchParams.get('url')).pathname===current}};}};
+ const api=vm.runInNewContext(helper+';({captureLessonFiles,captureGgbCandidates,captureGeoGebraBindings})',context);
+ let result=await api.captureLessonFiles(frame,lesson,async()=>{});
+ assert.equal(first.__vue__.conf.filename.path,current);assert.equal(other.__vue__.conf.filename.path,second);
+ assert.equal(result.total,2);assert.equal(result.failed,1);assert(result.issues[0].url.endsWith(second));
+ assert(!requested.some(url=>url.pathname.endsWith('Usp_vis_OK.ggb')));
+ for(const input of ['/DOS/449527/15/publication/4033/files/test.ggb','/DOS/449527/15/shared/files/test.ggb']){
+  const candidates=api.captureGgbCandidates(new URL(input,lesson));assert(candidates.every(url=>url.pathname.startsWith('/datastore/15/')));assert.equal(candidates[1].hostname,'api.izzi.digital');
+ }
+ first.__vue__.conf.filename.path=old;first.__vue__.conf.filename.src=old;
+ assert.equal(api.captureGeoGebraBindings(frame,new URL('https://bg.izzi.digital/DOS/449527/999.html')).length,0);
+ assert.equal(first.__vue__.conf.filename.path,old,'same component ID in another lesson stays unchanged');
+ first.getAttribute=name=>name==='block-id'?'unrelated':null;requested.length=0;
+ result=await api.captureLessonFiles(frame,lesson,async()=>{});assert.equal(result.failed,2,'another loaded GGB cannot satisfy either missing component');
+ console.log('PASS: lesson/component-scoped GGB binding, malformed paths and independent second missing file.');
+}
+run().then(componentBinding).catch(error=>{console.error(error);process.exitCode=1;});

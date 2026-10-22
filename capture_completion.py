@@ -1,11 +1,12 @@
 """Current-lesson GET requests and archive confirmation for strict browser capture."""
 import threading,time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit,urlunsplit
 from replay_resolver import find,pick,usable_body,_izzi_host
 from cache_bust_recovery import canonical_url
 import geogebra_runtime
 import bundled_assets
+import geogebra_capture
 from resource_policy import optional_reason
 LOCK=threading.RLock()
 CURRENT=None
@@ -56,7 +57,7 @@ def finish(identifier):
             url=CURRENT['pending'].pop(identifier)
             if not optional_reason(url):CURRENT['activity']=time.monotonic()
 
-def status(lesson,assets,mapping,archive):
+def status(lesson,assets,mapping,archive,geogebra_blocks=()):
     if not valid(lesson) or not isinstance(assets,list) or len(assets)>LIMIT:raise ValueError('Invalid lesson resource list')
     with LOCK:
         current=CURRENT if CURRENT and CURRENT['lesson']==canonical_url(lesson) else None
@@ -65,6 +66,8 @@ def status(lesson,assets,mapping,archive):
         truncated=bool(current and current['truncated'])
     urls.add(canonical_url(lesson))
     urls.update(canonical_url(value) for value in assets if isinstance(value,str) and valid(value))
+    urls={geogebra_capture.replacement(url,lesson,geogebra_blocks) or url for url in urls}
+    urls={urlunsplit(urlsplit(url)._replace(path=geogebra_capture.normalize_path(urlsplit(url).path))) for url in urls}
     import external_links
     urls-=external_links.false_css_dependencies(urls,mapping,archive)
     missing=[];warnings=[]

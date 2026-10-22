@@ -123,7 +123,7 @@ async function captureArchiveBarrier(frame,lesson){
 let last;
 for(let attempt=0;attempt<20;attempt++){
 const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
-try{const response=await fetch(O+'/__offline_capture__/lesson_status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lesson:lesson.href,assets:captureResourceAssets(frame,lesson)}),cache:'no-store',signal:controller.signal});
+try{const response=await fetch(O+'/__offline_capture__/lesson_status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lesson:lesson.href,assets:captureResourceAssets(frame,lesson),geogebra_blocks:typeof captureGeoGebraBindings==='function'?captureGeoGebraBindings(frame,lesson).map(row=>row.block):[]}),cache:'no-store',signal:controller.signal});
 if(!response.ok)throw new Error('Capture proxy не потвърди пълнотата на урока');last=await response.json();if(last.capture!==true)throw new Error('Нужен е обновен capture proxy');rememberCaptureIssues(lesson,last.warnings||[]);if(last.available)return [];
 if((last.missing||[]).length&&!last.pending?.length&&last.quiet_ms>=1000)break;
 }finally{clearTimeout(timer);}

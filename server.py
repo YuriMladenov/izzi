@@ -532,6 +532,9 @@ class H(BaseHTTPRequestHandler):
             return sender(b,ct,extra={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(Path(unquote(path)).name,safe='')})
         if mime.startswith("text/") or mime in TEXT or "javascript" in mime:
             try:
+                if mime.startswith('text/html'):
+                    import geogebra_capture
+                    b=geogebra_capture.prepare_html(b,'https://'+host+path)
                 b=rewrite(b,host,html_document=mime.startswith('text/html'))
                 if path.lower().endswith(".html"): b=inject_media_map(b,path)
             except UnicodeDecodeError:

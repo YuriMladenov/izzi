@@ -1,5 +1,6 @@
 /* Activate only the GeoGebra start controls, never arbitrary lesson buttons. */
 async function captureGeoGebra(frame,lesson){
+captureGeoGebraBindings(frame,lesson);
 const issues=[];
 for(const root of frame.contentDocument.querySelectorAll('[id^="geogebra-"].int')){
 if(root.classList.contains('ggc--loaded')||root.__izziGeoCaptureStarted)continue;
@@ -53,8 +54,31 @@ const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);image.on
 const timer=setTimeout(()=>finish(new Error('image timeout')),20000);image.onload=()=>finish(image.naturalWidth>0?null:new Error('невалидно изображение'));image.onerror=()=>finish(new Error('изображението не се зареди'));
 const fresh=new URL(url.href);fresh.searchParams.set('__izzi_offline_recover',Date.now().toString(36)+'_'+attempt);image.src=fresh.href;});if(!await status(url))throw new Error('няма годен body в архива');failed.delete(url.href);return;}catch(error){reason=error.message;}}failed.set(url.href,reason);};if(!await status(lesson))throw new Error('HTML на урока не е записан в архива');let checked=new Set(),stable=0;for(let round=0;round<6&&stable<2;round++){discover();
 const pending=[...seen.values()].filter(url=>!checked.has(url.href));stable=pending.length?0:stable+1;let index=0;await Promise.all(Array.from({length:Math.min(4,pending.length)},async()=>{while(index<pending.length){const url=pending[index++];checked.add(url.href);await load(url);}}));await new Promise(resolve=>setTimeout(resolve,1000));}discover();for(const url of seen.values())if(!checked.has(url.href))failed.set(url.href,'появи се след проверката');if(scrollIncomplete){await ping('scroll-incomplete',lesson,{reason:scrollFailure});}for(const [url,reason] of failed){console.warn('IZZI IMAGE MISSING',lesson.pathname,url,reason);await ping('image-failed',lesson,{asset:url,reason});}await ping('images-checked',lesson,{total:seen.size,failed:failed.size});return {total:seen.size,failed:failed.size+(scrollIncomplete?1:0),issues:[...[...failed].map(([url,reason])=>({kind:'image',url,reason})),...(scrollIncomplete?[{kind:'page',url:lesson.href,reason:scrollFailure}]:[])]};}
-function captureFileKey(url){return /\.ggb$/i.test(url.pathname)?'izzi'+url.pathname.replace(/^\/DOS\/\d+(?=\/datastore\/)/,'')+url.search:url.href;}
+function captureGgbURL(value,base){
+const url=new URL(value,base);
+if(['bg.izzi.digital','api.izzi.digital'].includes(url.hostname)&&/\.ggb$/i.test(url.pathname))url.pathname=url.pathname.replace(/^\/DOS\/\d+\/(\d+\/(?:publication\/\d+|shared)\/files\/)/,'/datastore/$1');
+return url;
+}
+function captureFileKey(url){url=captureGgbURL(url.href,url.href);return /\.ggb$/i.test(url.pathname)?'izzi'+url.pathname.replace(/^\/DOS\/\d+(?=\/datastore\/)/,'')+url.search:url.href;}
+function captureGeoGebraBindings(frame,lesson){
+const doc=frame.contentDocument,bindings=[];
+if(lesson.pathname!=='/DOS/449527/449779.html')return bindings;
+const old='/datastore/15/publication/4033/files/2019/11/12/1573547071_1569840746_1569840539_1569406914_1567105534_Usp_vis_OK.ggb';
+const current='/datastore/15/publication/4033/files/2020/04/29/1588167488_b5_u104_usp_vis.ggb';
+for(const node of doc.querySelectorAll('geogebra,[id^="geogebra-"].int')){
+const block=node.getAttribute?.('block-id')||node.closest?.('[block-id]')?.getAttribute('block-id')||node.id?.replace(/^geogebra-/,'');
+if(block!=='8470030')continue;
+const key=value=>{try{return captureFileKey(captureGgbURL(value,lesson.href));}catch{return '';}};
+const oldKey=key(old),newKey=key(current);let matched=false;
+const patch=config=>{const file=config?.filename;if(!file)return;for(const field of ['path','src'])if(file[field]&&[oldKey,newKey].includes(key(file[field]))){file[field]=current;matched=true;}if(matched&&file.resource)for(const field of ['path','src'])if(file.resource[field]&&key(file.resource[field])===oldKey)file.resource[field]=current;};
+patch(node.__vue__?.conf);
+for(const name of ['v-bind:config',':config']){const raw=node.getAttribute?.(name);if(!raw)continue;try{const area=document.createElement('textarea');area.innerHTML=raw;const data=JSON.parse(area.value);patch(data.config);if(matched)node.setAttribute(name,JSON.stringify(data));}catch{}}
+if(matched)bindings.push({block:'8470030',old:new URL(old,lesson.href).href,current:new URL(current,lesson.href).href});
+}
+return bindings;
+}
 function captureGgbCandidates(url){
+url=captureGgbURL(url.href,url.href);
 const result=[url];
 const path=url.pathname.replace(/^\/DOS\/\d+(?=\/datastore\/)/,'');
 if(/\.ggb$/i.test(path)&&['bg.izzi.digital','api.izzi.digital'].includes(url.hostname)&&/^\/datastore\/\d+\/(?:publication\/\d+|shared)\/files\//.test(path)){
@@ -64,6 +88,7 @@ if(api.href!==url.href)result.push(api);
 return result;
 }
 async function captureLessonFiles(frame,lesson,ping,options={}){const doc=frame.contentDocument,urls=new Map();
+const bindings=captureGeoGebraBindings(frame,lesson);
 const add=value=>{if(/^\d+\/(?:publication|shared)\//.test(value))value='/datastore/'+value;let url;try{url=new URL(value,doc.baseURI||lesson.href)}catch{return}if(!/^https?:$/.test(url.protocol)||url.username||url.password||!/(^|\.)izzi\.digital$/i.test(url.hostname))return;if(!url.pathname.includes('/files/')&&!/\.(ggb|sb3|sb2|sb|exe|zip|7z|rar|pdf|docx?|xlsx?|pptx?|odt|ods|odp|txt|csv)$/i.test(url.pathname))return;url.hash='';urls.set(captureFileKey(url),url);};for(const node of doc.querySelectorAll('a[href],a[download]'))add(node.getAttribute('href'));
 const area=document.createElement('textarea');area.innerHTML=doc.documentElement.outerHTML;
 const text=area.value.replace(/\\u002[fF]/g,'/').replace(/\\\//g,'/').replace(/\\["']/g,'"');for(const match of text.matchAll(/<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["']/gi))add(match[1]);
@@ -75,7 +100,8 @@ let config=node.__vue__?.conf;
 if(!config){try{const raw=node.getAttribute?.('v-bind:config')||node.getAttribute?.(':config');if(raw){area.innerHTML=raw;config=JSON.parse(area.value).config;}}catch{}}
 for(const value of [config?.filename?.path,config?.filename?.src])if(value)add(value);
 }
-const selected=[...urls.values()].filter(url=>!options.targets||options.targets.some(value=>{try{return captureFileKey(new URL(value,doc.baseURI||lesson.href))===captureFileKey(url);}catch{return false;}}));
+for(const binding of bindings){urls.delete(captureFileKey(new URL(binding.old)));add(binding.current);}
+const selected=[...urls.values()].map(url=>captureGgbURL(url.href,lesson.href)).filter(url=>!options.targets||options.targets.some(value=>{try{let key=captureFileKey(new URL(value,doc.baseURI||lesson.href));for(const binding of bindings)if(key===captureFileKey(new URL(binding.old)))key=captureFileKey(new URL(binding.current));return key===captureFileKey(url);}catch{return false;}}));
 let failed=0;
 const issues=[];for(const url of selected){
 let saved=false;const reasons=[],ggb=/\.ggb$/i.test(url.pathname);

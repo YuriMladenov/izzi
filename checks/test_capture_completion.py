@@ -19,6 +19,37 @@ class Completion(unittest.TestCase):
         if content_range:row['content_range']=content_range
         self.mapping[url]=[row]
     def settled(self):completion.CURRENT['activity']-=2
+    def test_geogebra_binding_is_scoped_and_requires_actual_replacement_body(self):
+        import geogebra_capture as geo
+        import io,zipfile
+        self.lesson='https://bg.izzi.digital'+geo.LESSON
+        completion.start(self.lesson);self.add(self.lesson,b'<html>lesson</html>');self.settled()
+        old='https://bg.izzi.digital'+geo.OLD;current='https://bg.izzi.digital'+geo.CURRENT
+        second='https://bg.izzi.digital/datastore/15/publication/4033/files/second.ggb'
+        result=completion.status(self.lesson,[old,second],self.mapping,self.archive,[geo.BLOCK])
+        self.assertEqual({current,second},{row['url'] for row in result['missing']})
+        buf=io.BytesIO()
+        with zipfile.ZipFile(buf,'w') as z:z.writestr('geogebra.xml','<geogebra/>')
+        self.add(current,buf.getvalue())
+        result=completion.status(self.lesson,[old,second],self.mapping,self.archive,[geo.BLOCK])
+        self.assertEqual([second],[row['url'] for row in result['missing']])
+        self.assertFalse(result['available'])
+        self.assertTrue(completion.status(self.lesson,[old],self.mapping,self.archive,[geo.BLOCK])['available'])
+        self.assertFalse(completion.status(self.lesson,[old],self.mapping,self.archive,[])['available'])
+        self.assertIsNone(geo.replacement(old,'https://bg.izzi.digital/DOS/449527/other.html',[geo.BLOCK]))
+        malformed='https://bg.izzi.digital/DOS/449527/'+geo.CURRENT.removeprefix('/datastore/')
+        self.assertTrue(completion.status(self.lesson,[malformed],self.mapping,self.archive)['available'])
+        self.assertEqual('https://api.izzi.digital'+geo.CURRENT,capture_addon.datastore_fallback_url(malformed))
+        self.assertIsNone(capture_addon.datastore_fallback_url(malformed.replace('bg.izzi.digital','evil.example')))
+        import html
+        config=html.escape(json.dumps({'config':{'filename':{'path':geo.OLD,'src':geo.OLD}}}),quote=True)
+        source=(f'<geogebra block-id="{geo.BLOCK}" v-bind:config=\'{config}\'></geogebra>'
+                f'<geogebra block-id="8470039" v-bind:config=\'{config}\'></geogebra>').encode()
+        prepared=geo.prepare_html(source,self.lesson)
+        first,second_tag=prepared.split(b'</geogebra>',1)
+        self.assertIn(geo.CURRENT.encode(),first);self.assertNotIn(geo.OLD.encode(),first)
+        self.assertIn(geo.OLD.encode(),second_tag)
+        self.assertEqual(source,geo.prepare_html(source,'https://bg.izzi.digital/DOS/1/2.html'))
     def test_optional_missing_and_pending_resources_warn_without_blocking(self):
         optional='https://bg.izzi.digital/app.js.map'
         completion.watch(optional,'GET',self.lesson,'optional');self.settled()

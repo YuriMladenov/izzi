@@ -18,6 +18,7 @@ import external_links
 import capture_completion
 import archive_db
 import geogebra_runtime
+import geogebra_capture
 import bundled_assets
 from archive_storage import blob_key
 
@@ -113,7 +114,9 @@ def _request(flow):
             raw=flow.request.content or b''
             if flow.request.method!='POST' or len(raw)>256*1024:raise ValueError('Invalid status request')
             data=json.loads(raw)
-            result=capture_completion.status(data.get('lesson',''),data.get('assets',[]),load_json(URL_MAP_FILE,{}),ARCHIVE_DIR)
+            blocks=data.get('geogebra_blocks',[])
+            if not isinstance(blocks,list) or len(blocks)>100 or any(not isinstance(block,str) for block in blocks):raise ValueError('Invalid GeoGebra blocks')
+            result=capture_completion.status(data.get('lesson',''),data.get('assets',[]),load_json(URL_MAP_FILE,{}),ARCHIVE_DIR,blocks)
             flow.response=http.Response.make(200,json.dumps(result).encode(),{'Content-Type':'application/json','Cache-Control':'no-store'})
         except (OSError,ValueError,AttributeError) as error:
             flow.response=http.Response.make(503,b'{"error":"Lesson archive status unavailable"}',{'Content-Type':'application/json'})
@@ -232,7 +235,7 @@ def datastore_fallback_url(url):
     try:
         if p.scheme not in ('http','https') or p.hostname!=SOURCE_HOST or p.username or p.password or p.port not in (None,80,443):return None
     except ValueError:return None
-    path=re.sub(r'^/DOS/\d+(?=/datastore/)','',p.path)
+    path=re.sub(r'^/DOS/\d+(?=/datastore/)','',geogebra_capture.normalize_path(p.path))
     decoded=unquote(path)
     if '\\' in decoded or any(part in ('.','..') for part in decoded.split('/')):return None
     block=re.fullmatch(r'/datastore/blocks/\d+/.+',path)
