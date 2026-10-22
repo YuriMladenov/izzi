@@ -117,4 +117,28 @@ class AdminAccess(unittest.TestCase):
             self.assertEqual(405,self.request('/__admin__/login',{'password':'private'},method=method)[0])
         self.assertFalse((self.state/'progress').exists())
 
+    def maintenance_request(self,action,cookie='',token='',origin=None,host='192.168.1.20'):
+        connection=http.client.HTTPConnection('127.0.0.1',self.httpd.server_port,timeout=5)
+        headers={'Host':host,'Cookie':cookie,'Content-Type':'application/json','X-IZZI-Control':token}
+        if origin:headers['Origin']=origin
+        connection.request('POST','/__maintenance__/action',json.dumps({'action':action}),headers)
+        response=connection.getresponse();result=response.status,response.read();connection.close();return result
+    def test_maintenance_requires_administrator_token_and_same_origin(self):
+        self.start()
+        self.assertEqual(403,self.request('/__maintenance__')[0]);self.assertEqual(403,self.request('/__maintenance__/status')[0])
+        _,headers,_=self.login();cookie=headers['Set-Cookie'].split(';')[0];token=server.operations.tasks.token
+        self.assertEqual(200,self.request('/__maintenance__',cookie=cookie)[0])
+        with patch.object(server.project_maintenance.updates,'start') as start:
+            self.assertEqual(403,self.maintenance_request('update',cookie)[0])
+            self.assertEqual(403,self.maintenance_request('update',cookie,token,origin='http://evil.example')[0])
+            self.assertEqual(403,self.maintenance_request('update',token=token)[0]);start.assert_not_called()
+            self.assertEqual(200,self.maintenance_request('update',cookie,token,origin='http://192.168.1.20')[0]);start.assert_called_once()
+        with patch.object(server.project_maintenance,'launch_startup_setup') as setup:
+            self.assertEqual(403,self.maintenance_request('startup',cookie,token)[0]);setup.assert_not_called()
+        with patch.dict(server.os.environ,{'IZZI_MANAGED_LAUNCH':'0'}):
+            self.assertEqual(400,self.maintenance_request('restart',cookie,token)[0])
+        self.assertEqual(400,self.maintenance_request('arbitrary-command',cookie,token)[0])
+        self.assertEqual(405,self.request('/__maintenance__/action',{'action':'update'},method='PUT')[0])
+        self.assertFalse((self.state/'progress').exists())
+
 if __name__=='__main__':unittest.main()

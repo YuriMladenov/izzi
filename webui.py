@@ -6,6 +6,8 @@ def page(content,title='Библиотека',active='library',search=False,cata
     content=re.sub(r'<!doctype[^>]*>|<meta[^>]*>|<link[^>]*>|<title>.*?</title>','',content,flags=re.I|re.S)
     links=[('library','/','Библиотека','▤'),('missing','/__missing__','Липсващи ресурси','↧'),('videos','/__videos__','Недовършени видеа','▶'),('journal','/__journal__','Локален журнал','◷'),('cleanup','/__cleanup__','Почистване на архива','⌫'),('operations','/__operations__','Capture и проверки','▷'),('help','/__help__','Как да използвам','?')]
     links.append(('admin','/__admin__/account','Администратор','⚙'))
+    links.append(('maintenance','/__maintenance__#update','Обновяване от GitHub','↻'))
+    links.append(('startup','/__maintenance__#startup','Стартиране с Windows','▷'))
     if admin_session:links.append(('logout','/__admin__/logout','Изход','↪'))
     nav=''.join('<a href="%s" %s><span aria-hidden="true">%s</span>%s</a>'%(url,'aria-current="page"' if key==active else '',icon,label) for key,url,label,icon in links)
     searchbox='<div class="searchbar"><label for="ui-search">Търсене в списъка</label><input id="ui-search" type="search" placeholder="Въведи име, ID или адрес…" autocomplete="off"><span id="ui-count" role="status"></span></div><p id="ui-no-results" hidden>Няма съвпадения. Опитай с друго име или ID.</p>' if search else ''

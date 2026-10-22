@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-import html,json,mimetypes,re,time,hashlib,gzip
+import html,json,mimetypes,re,time,hashlib,gzip,os,threading,sys
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from pathlib import Path
 from html.parser import HTMLParser
@@ -17,6 +17,9 @@ import replay_cache
 import geogebra_runtime
 import admin_account
 import bundled_assets
+import project_maintenance
+RUNNING_SERVER=None
+RESTART_REQUESTED=False
 from bundled_assets import bundled_font
 from archive_state import load as load_archive_state
 
@@ -545,6 +548,12 @@ class H(BaseHTTPRequestHandler):
     def route(self):
         p=urlparse(self.path)
         if p.path.startswith('/__admin__'):return self.admin_page()
+        if p.path in ('/__maintenance__','/__maintenance__/status'):
+            if not self.admin_allowed():return self.sendb(b'Administrator required','text/plain',403)
+            if p.path.endswith('/status'):
+                data={'update':project_maintenance.updates.snapshot(),'managed':os.environ.get('IZZI_MANAGED_LAUNCH')=='1','windows':os.name=='nt','startup':project_maintenance.startup_status(STATE_DIR)}
+                return self.sendb(json.dumps(data).encode(),'application/json')
+            return self.maintenance_page()
         readonly=not self.admin_allowed()
         if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__','/__cleanup__','/__videos__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/','/__videos__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
             return self.sendb(b'Administrator required','text/plain; charset=utf-8',403)
@@ -717,7 +726,7 @@ class H(BaseHTTPRequestHandler):
     def do_HEAD(self):
         with archive_db.read_session():self.route()
     def progress(self):
-        if urlparse(self.path).path.startswith('/__admin__'):
+        if urlparse(self.path).path.startswith(('/__admin__','/__maintenance__')):
             self.close_connection=True;return self.sendb(b'Method not allowed','text/plain',405,{'Allow':'GET, HEAD, POST'})
         if self.headers.get("Transfer-Encoding"):
             self.close_connection=True
@@ -743,6 +752,7 @@ class H(BaseHTTPRequestHandler):
         print("[PROGRESS]",bid,self.command,urlparse(self.path).path)
         self.sendb(b'{"offline":true,"saved":true}',"application/json",200)
     def do_POST(self):
+        if urlparse(self.path).path=='/__maintenance__/action':return self.maintenance_action()
         if urlparse(self.path).path.startswith('/__admin__'):return self.admin_action()
         if urlparse(self.path).path=='/__cleanup__':return self.cleanup_action()
         if urlparse(self.path).path.startswith('/__delete_book__/'):return self.delete_book_action()
@@ -853,6 +863,43 @@ class H(BaseHTTPRequestHandler):
         host=urlparse('http://'+self.headers.get('Host','')).hostname
         return self.client_address[0] in ('127.0.0.1','::1') and host in ('127.0.0.1','localhost','::1')
 
+    def maintenance_page(self):
+        content='<h1>Поддръжка на проекта</h1><div id="maintenance" data-token="'+html.escape(operations.tasks.token,quote=True)+'"><section id="update"><h2>Обновяване от GitHub</h2><p>Изтегля последните промени за текущия клон main или WebUI. Спри capture, проверките и изтеглянето на видеа. Локални промени и промени на зависимости блокират обновяването.</p><button data-maintenance="update">Провери и обнови от GitHub</button> <button data-maintenance="restart" disabled>Рестартирай библиотеката</button><p id="update-state" role="status"></p><pre id="update-log" class="task-log"></pre></section><section id="startup"><h2>Стартиране с Windows</h2>'
+        if os.name=='nt' and self.control_local():
+            content+='<p>Създава задача преди входа в Windows под текущия потребител на сървъра. Ще се отворят UAC и системен прозорец за Windows паролата (не PIN). Задачата стартира библиотеката и capture 30 секунди след зареждане на Windows.</p><button data-maintenance="startup">Създай / обнови Windows задача</button>'
+        elif os.name=='nt':content+='<p>За създаване на задачата отвори тази страница на Windows компютъра през http://127.0.0.1:8765/.</p>'
+        else:content+='<p>Task Scheduler е наличен само на Windows. Docker контейнерът използва restart: unless-stopped.</p>'
+        content+='<p id="startup-state" role="status"></p></section><p id="maintenance-message" role="status"></p></div><script src="/__ui__/maintenance.js" defer></script>'
+        return self.sendb(self.ui(content,'Поддръжка','maintenance').encode(),'text/html; charset=utf-8')
+
+    def maintenance_action(self):
+        global RESTART_REQUESTED
+        if not self.admin_allowed() or not self.origin_valid() or self.headers.get('X-IZZI-Control')!=operations.tasks.token:
+            self.close_connection=True;return self.sendb(b'Administrator confirmation required','text/plain',403)
+        try:
+            if self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('Invalid request')
+            length=int(self.headers.get('Content-Length','0'))
+            if not 0<length<=256:raise ValueError('Invalid request length')
+            self.connection.settimeout(10);raw=self.rfile.read(length)
+            if len(raw)!=length:raise ValueError('Incomplete request')
+            data=json.loads(raw)
+            if not isinstance(data,dict) or set(data)!={'action'}:raise ValueError('Unknown command')
+            action=data['action']
+            if action=='update':project_maintenance.updates.start();result={'message':'Проверката и обновяването са стартирани.'}
+            elif action=='startup':
+                if not self.control_local():return self.sendb(b'Local Windows control required','text/plain',403)
+                result=project_maintenance.launch_startup_setup()
+            elif action=='restart':
+                if os.environ.get('IZZI_MANAGED_LAUNCH')!='1' or RUNNING_SERVER is None:raise ValueError('Стартирай проекта чрез start_library.bat / project_launcher.py, или рестартирай ръчно.')
+                if project_maintenance.updates.snapshot()['state']=='running':raise ValueError('Изчакай обновяването да приключи.')
+                project_maintenance.require_idle();RESTART_REQUESTED=True
+                threading.Timer(1,RUNNING_SERVER.shutdown).start();result={'message':'Библиотеката се рестартира. Страницата ще се свърже отново.'}
+            else:raise ValueError('Unknown command')
+            return self.sendb(json.dumps(result,ensure_ascii=False).encode(),'application/json')
+        except (OSError,ValueError,TimeoutError) as error:
+            self.close_connection=True
+            return self.sendb(json.dumps({'error':str(error)},ensure_ascii=False).encode(),'application/json',400)
+
     def control_action(self):
         origin=self.headers.get('Origin')
         if not self.admin_allowed() or not self.origin_valid() or self.headers.get('X-IZZI-Control')!=operations.tasks.token:
@@ -866,6 +913,7 @@ class H(BaseHTTPRequestHandler):
             raw=self.rfile.read(length)
             if len(raw)!=length:raise ValueError('Incomplete request')
             data=json.loads(raw)
+            if isinstance(data,dict) and data.get('action')=='start' and project_maintenance.updates.snapshot()['state']=='running':raise ValueError('Изчакай обновяването да приключи.')
             if urlparse(self.path).path=='/__videos__/action':
                 import video_resume
                 if not isinstance(data,dict) or data.get('action') not in ('start','stop') or not isinstance(data.get('id','all'),str):raise ValueError('Unknown command')
@@ -982,14 +1030,23 @@ class H(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args):print("[HTTP]",fmt%args)
 
 if __name__=="__main__":
+    if os.name=='nt':
+        import signal
+        signal.signal(signal.SIGBREAK,signal.default_int_handler)
     for d in (ARCHIVE_DIR,STATE_DIR,CAPTURES_DIR,PROGRESS_DIR):d.mkdir(parents=True,exist_ok=True)
     import archive_db
     archive_db.initialize(STATE_DIR)
     print(f"IZZI Offline Library: http://{CLIENT_HOST}:{PORT}/")
     print(f"Listening on {HOST}:{PORT}; LAN access: http://<computer IPv4>:{PORT}/")
     try:
-        ThreadingHTTPServer((HOST,PORT),H).serve_forever()
+        RUNNING_SERVER=ThreadingHTTPServer((HOST,PORT),H)
+        if os.environ.get('IZZI_START_CAPTURE')=='1' and not operations.capture_port_busy():
+            try:operations.tasks.start('capture')
+            except (OSError,ValueError) as error:print('[STARTUP CAPTURE]',error)
+        RUNNING_SERVER.serve_forever()
     finally:
         import video_resume
         video_resume.jobs.stop()
         operations.tasks.close()
+        if RUNNING_SERVER:RUNNING_SERVER.server_close()
+    if RESTART_REQUESTED:sys.exit(75)

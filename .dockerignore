@@ -5,6 +5,7 @@
 archive
 state
 captures
+capture
 **/*.har
 **/*.har.*
 *.zip

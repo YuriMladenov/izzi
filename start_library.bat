@@ -14,5 +14,5 @@ if errorlevel 1 (
  start "IZZI Capture Proxy" "%ComSpec%" /c call "%~dp0capture_mode.bat"
 )
 start "" http://127.0.0.1:8765/
-py server.py
+py project_launcher.py
 pause

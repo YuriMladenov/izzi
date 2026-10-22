@@ -11,6 +11,7 @@ services:
     environment:
       IZZI_CAPTURE_HOST: "0.0.0.0"
     volumes:
+      - /DATA/AppData/izzi/code:/opt/izzi
       - /DATA/AppData/izzi/archive:/app/archive
       - /DATA/AppData/izzi/state:/app/state
       - /DATA/AppData/izzi/captures:/app/captures
