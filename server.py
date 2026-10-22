@@ -601,7 +601,7 @@ class H(BaseHTTPRequestHandler):
             stages={**{str(grade)+'. клас':[] for grade in range(1,13)},'Без определен клас':[]}
             items=[]
             for bid,b in sorted(books.items(),key=lambda item:(covers[item[0]]['grade'] or 99,item[1].get('title',''),item[0])):
-                card=webui.book_card(bid,b.get('title','Учебник '+bid),covers[bid]['src'],covers[bid]['decoration'],covers[bid]['palette'])
+                card=webui.book_card(bid,b.get('title','Учебник '+bid),covers[bid]['src'],covers[bid]['decoration'],covers[bid]['palette'],publisher=covers[bid]['publisher'])
                 grade=covers[bid]['grade']
                 stage=str(grade)+'. клас' if 1<=grade<=12 else 'Без определен клас'
                 stages[stage].append(card);items.append(card)

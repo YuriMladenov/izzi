@@ -4,6 +4,12 @@ from urllib.parse import urlsplit,quote
 from replay_resolver import find,usable_body
 SOURCE='bg.izzi.digital'
 
+def publisher_name(*sources):
+    for source in sources:
+        value=source.get('publisher') if isinstance(source,dict) else None
+        if isinstance(value,str) and value.strip():return value.strip()
+    return ''
+
 def grade_number(title,publication=None):
     publication=publication or {}
     grade=publication.get('grade',{})
@@ -25,7 +31,7 @@ def grade_number(title,publication=None):
     return 0
 
 def catalog_covers(mapping,archive,books):
-    result={str(bid):{'src':'','decoration':'','palette':'','grade':grade_number(book.get('title',''))} for bid,book in books.items()}
+    result={str(bid):{'src':'','decoration':'','palette':'','grade':grade_number(book.get('title','')),'publisher':publisher_name(book)} for bid,book in books.items()}
     record=find(mapping,SOURCE,'/api/online-bookshelf-publications','',lambda row:usable_body(row,archive,'.json'))
     if not record:return result
     try:payload=json.loads((archive/record['key']).read_text(encoding='utf8'))
@@ -50,6 +56,7 @@ def catalog_covers(mapping,archive,books):
         if not isinstance(publication,dict):return
         bid=str(publication.get('dos_id',''))
         if bid not in result:return
+        result[bid]['publisher']=publisher_name(publication,group,books[bid])
         thumbs=publication.get('thumbs')
         if not thumbnail(thumbs):thumbs=(group or {}).get('thumbs')
         cover=thumbnail(thumbs,('image1',)) or thumbnail(thumbs)

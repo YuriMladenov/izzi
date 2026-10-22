@@ -4,6 +4,7 @@
 
 /* Compact offline library. Original thumbnails come from local archive only. */
 .catalog-home{background:#fafbfc;color:#283344;--accent:#7350a4}
+.catalog-home .book-publisher{margin:4px 0 6px;font-size:12px;line-height:1.4;color:#596675;overflow-wrap:anywhere}
 .catalog-header{height:72px;background:#fff;border-bottom:1px solid #e8ebef;display:flex;align-items:center;justify-content:space-between;padding:0 max(5vw,20px);position:relative;z-index:5}
 .catalog-logo{display:flex;align-items:center;text-decoration:none}.catalog-logo img{display:block;width:116px;height:42px;object-fit:contain}
 .library-menu{position:relative}.library-menu>summary{list-style:none;cursor:pointer;padding:9px 16px;border:1px solid #e3dbea;border-radius:9px;color:#7350a4;display:flex;gap:9px;font-size:14px}.library-menu>summary::-webkit-details-marker{display:none}.library-menu>summary:focus-visible{outline:3px solid #ffbc52;outline-offset:3px}.library-menu[open]>summary{background:#f6f2fa}.library-menu nav{position:absolute;right:0;top:44px;width:270px;padding:9px;margin:0;background:#fff;border:1px solid #e3dbea;border-radius:10px;box-shadow:0 8px 26px #24304415;display:grid;gap:3px}.library-menu nav a{font-size:14px}.library-menu nav a[aria-current]{background:#f6f2fa;color:#7350a4}

@@ -24,7 +24,7 @@ def page(content,title='Библиотека',active='library',search=False,cata
     return ('<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>'+html.escape(title)+' · IZZI Library</title><link rel="stylesheet" href="/__ui__/app.css"><script src="/__ui__/app.js" defer></script></head><body class="catalog-home"><header class="catalog-header"><a class="catalog-logo" href="/" aria-label="IZZI — Библиотека"><img src="/__ui__/izzi-logo.svg" alt="IZZI" width="116" height="42"></a>'+menu+'</header><main id="main-content"><div class="content">'+heading+searchbox+content+'</div></main></body></html>')
 
 
-def book_card(book_id,title,cover='',decoration='',palette=''):
+def book_card(book_id,title,cover='',decoration='',palette='',publisher=''):
     bid=html.escape(str(book_id),quote=True)
     title=html.escape(str(title))
     icon='<span class="cover-placeholder" aria-hidden="true"><svg viewBox="0 0 48 60" width="40" height="50"><rect x="5" y="4" width="36" height="50" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 4v50M19 19h15M19 26h12" fill="none" stroke="currentColor" stroke-width="2"/></svg></span>'
@@ -33,4 +33,4 @@ def book_card(book_id,title,cover='',decoration='',palette=''):
     palette=palette if re.fullmatch(r'palette(?:[0-9]|[1-4][0-9]|5[0-2])',palette) else ''
     return ('<li data-search-item class="catalog-book"><a class="book-open" href="/__book__/'+bid+'">'
             '<div class="book-thumbnail '+palette+('' if cover else ' no-cover')+'"><span class="cover-tile" aria-hidden="true"></span>'+image+decor+icon+'</div>'
-            '<h3>'+title+'</h3><small>ID '+bid+'</small></a></li>')
+            '<h3>'+title+'</h3><p class="book-publisher">Издателство: '+html.escape(publisher or 'не е посочено')+'</p><small>ID '+bid+'</small></a></li>')
