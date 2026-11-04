@@ -39,8 +39,39 @@ echo Stop the replay server and capture proxy before updating.
 echo The update uses fast-forward only. It does not reset or clean your files.
 pause
 
-echo Updating branch %IZZI_UPDATE_BRANCH%...
-git pull --ff-only origin "%IZZI_UPDATE_BRANCH%"
+echo Fetching main...
+git fetch origin refs/heads/main:refs/remotes/origin/main
+if errorlevel 1 (
+    echo ERROR: Could not fetch main. Read the Git message above.
+    goto failed
+)
+
+git merge-base --is-ancestor HEAD refs/remotes/origin/main
+if errorlevel 1 (
+    echo ERROR: The current branch has commits not included in origin/main.
+    echo Update stopped. Your local commits were preserved.
+    goto failed
+)
+
+git show-ref --verify --quiet refs/heads/main
+if errorlevel 1 (
+    git switch -c main --track origin/main
+) else (
+    git merge-base --is-ancestor refs/heads/main refs/remotes/origin/main
+    if errorlevel 1 (
+        echo ERROR: Local main has commits not included in origin/main.
+        echo Update stopped. Your local commits were preserved.
+        goto failed
+    )
+    git switch main
+)
+if errorlevel 1 (
+    echo ERROR: Could not switch to main.
+    goto failed
+)
+
+echo Updating main...
+git merge --ff-only refs/remotes/origin/main
 if errorlevel 1 (
     echo ERROR: Update failed. Read the Git message above.
     goto failed
