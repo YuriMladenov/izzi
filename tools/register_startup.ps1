@@ -5,6 +5,8 @@ param([Parameter(Mandatory=$true)][string]$ProjectRoot,
 $ErrorActionPreference = 'Stop'
 $resultPath = Join-Path $ProjectRoot 'state\startup_task_result.json'
 try {
+    Write-Host ('IZZI startup setup for: ' + $Account)
+    Write-Host 'Enter your Windows password, not your Windows Hello PIN. Do not close this window until setup finishes.'
     if (!(Test-Path -LiteralPath $PythonExe -PathType Leaf)) { throw 'Python executable is missing.' }
     $launcher = Join-Path $ProjectRoot 'project_launcher.py'
     if (!(Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'Project launcher is missing.' }
@@ -21,11 +23,14 @@ try {
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
     # The password is handed to Windows Task Scheduler, never saved in the project.
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -User $Account -Password $credential.GetNetworkCredential().Password -RunLevel Limited -Description ('IZZI Library: ' + $ProjectRoot) -Force | Out-Null
-    $result = @{ok=$true; task=$TaskName; account=$Account; message='Installed: starts 30 seconds after Windows boot, before sign-in.'}
+    $result = @{ok=$true; pending=$false; task=$TaskName; account=$Account; message='Installed: starts 30 seconds after Windows boot, before sign-in.'}
 } catch {
-    $result = @{ok=$false; task=$TaskName; account=$Account; message=$_.Exception.Message}
+    $result = @{ok=$false; pending=$false; task=$TaskName; account=$Account; message=$_.Exception.Message}
 } finally {
     $credential = $null
 }
 New-Item -ItemType Directory -Path (Split-Path $resultPath) -Force | Out-Null
 $result | ConvertTo-Json | Set-Content -LiteralPath $resultPath -Encoding UTF8
+
+Write-Host $result.message
+Write-Host 'Setup finished. You can close this PowerShell window and check the library page.'

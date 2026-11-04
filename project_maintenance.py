@@ -92,12 +92,23 @@ def launch_startup_setup(root=ROOT):
     script=root/'tools/register_startup.ps1'
     command='& '+psquote(script)+' -ProjectRoot '+psquote(root)+' -PythonExe '+psquote(sys.executable)+' -Account '+psquote(account)+' -TaskName '+psquote(task_name(root))
     encoded=base64.b64encode(command.encode('utf-16le')).decode()
-    elevated="Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',"+psquote(encoded)+") -Verb RunAs -WindowStyle Hidden"
-    result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(elevated.encode('utf-16le')).decode()],capture_output=True,text=True,timeout=90,creationflags=subprocess.CREATE_NO_WINDOW)
-    if result.returncode:raise ValueError('Системният прозорец за настройване не беше стартиран или UAC беше отказан.')
-    return {'message':'Потвърди UAC и въведи Windows паролата в системния прозорец. След това обнови статуса.','account':account,'task':task_name(root)}
+    elevated="Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NoExit','-ExecutionPolicy','Bypass','-EncodedCommand',"+psquote(encoded)+") -Verb RunAs -WindowStyle Normal"
+    task=task_name(root);path=root/'state/startup_task_result.json'
+    def record(ok,pending,message):
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text(json.dumps({'ok':ok,'pending':pending,'message':message,'account':account,'task':task},ensure_ascii=False),encoding='utf8')
+    message='Изчакване на UAC и Windows паролата на компютъра, където работи библиотеката. Потърси видимия PowerShell прозорец.'
+    record(False,True,message)
+    try:
+        result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(elevated.encode('utf-16le')).decode()],capture_output=True,text=True,encoding='utf8',errors='replace',timeout=90,creationflags=subprocess.CREATE_NO_WINDOW)
+        if result.returncode:raise ValueError('Прозорецът за настройване не беше стартиран или UAC беше отказан. Опитай от локалния Windows работен плот.')
+    except (OSError,ValueError,subprocess.TimeoutExpired) as error:
+        message=str(error) if not isinstance(error,subprocess.TimeoutExpired) else 'Изтече времето за потвърждение на UAC. Повтори настройката от локалния Windows работен плот.'
+        record(False,False,message)
+        raise ValueError(message) from None
+    return {'message':message,'account':account,'task':task}
 
 def startup_status(state):
     path=Path(state)/'startup_task_result.json'
-    try:return json.loads(path.read_text(encoding='utf8-sig'))
+    try:return json.loads(path.read_text(encoding='utf-8-sig'))
     except (OSError,ValueError):return None

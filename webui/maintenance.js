@@ -17,6 +17,7 @@ if(restarting){message.textContent='Библиотеката отново е д�
 }
 root.querySelectorAll('button[data-maintenance]').forEach(button=>button.addEventListener('click',async()=>{
 if(busy)return;busy=true;button.disabled=true;
+if(button.dataset.maintenance==='startup'){message.textContent='Изчакване на UAC и прозореца за Windows паролата на компютъра с библиотеката…';message.scrollIntoView?.({block:'nearest'});}
 try{
 const response=await fetch('/__maintenance__/action',{method:'POST',headers:{'Content-Type':'application/json','X-IZZI-Control':root.dataset.token},body:JSON.stringify({action:button.dataset.maintenance})});
 const text=await response.text();let data;try{data=JSON.parse(text);}catch{throw new Error(text||'Командата е отказана.');}

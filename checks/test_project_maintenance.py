@@ -1,5 +1,6 @@
 """Maintenance uses isolated Git repositories; never updates the user's checkout."""
-import importlib.util,json,os,subprocess,sys,tempfile,unittest,shutil
+import base64,importlib.util,json,os,re,subprocess,sys,tempfile,unittest,shutil
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -67,6 +68,49 @@ class Updates(unittest.TestCase):
         self.assertIn('-ExecutionTimeLimit ([TimeSpan]::Zero)',script)
         self.assertIn('SecurityIdentifier',script)
         self.assertEqual("'O''Brien'",maintenance.psquote("O'Brien"))
+
+class StartupSetup(unittest.TestCase):
+    def test_status_reads_windows_powershell_utf8_bom(self):
+        with tempfile.TemporaryDirectory() as td:
+            state=Path(td)
+            (state/'startup_task_result.json').write_text(json.dumps({'ok':True,'message':'Installed'}),encoding='utf-8-sig')
+            self.assertTrue(maintenance.startup_status(state)['ok'])
+
+    def launch(self,root,run):
+        with patch.object(maintenance,'os',SimpleNamespace(name='nt')),patch.object(maintenance,'windows_account',return_value='PC\\Учител'),patch.object(subprocess,'CREATE_NO_WINDOW',0,create=True),patch.object(subprocess,'run',side_effect=run):
+            return maintenance.launch_startup_setup(root)
+
+    def test_visible_prompt_pending_state_and_completed_result_are_preserved(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/"O'Brien Учител";root.mkdir()
+            def run(args,**kwargs):
+                pending=maintenance.startup_status(root/'state')
+                self.assertTrue(pending['pending']);self.assertFalse(pending['ok'])
+                outer=base64.b64decode(args[-1]).decode('utf-16le')
+                self.assertIn('-WindowStyle Normal',outer);self.assertNotIn('Hidden',outer)
+                self.assertIn("'-NoExit'",outer)
+                inner=base64.b64decode(re.search(r"'-EncodedCommand','([^']+)'",outer)[1]).decode('utf-16le')
+                self.assertIn(maintenance.psquote(root.resolve()),inner)
+                self.assertIn("-Account 'PC\\Учител'",inner)
+                self.assertNotIn('Password',inner)
+                # The native script can finish before the launching process returns.
+                (root/'state/startup_task_result.json').write_text(json.dumps({'ok':True,'pending':False,'message':'Installed'}),encoding='utf8')
+                return SimpleNamespace(returncode=0)
+            result=self.launch(root,run)
+            self.assertIn('PowerShell',result['message'])
+            self.assertTrue(maintenance.startup_status(root/'state')['ok'])
+
+    def test_uac_cancellation_and_launch_failure_clear_pending_state(self):
+        for failure in ('cancel','timeout','missing'):
+            with self.subTest(failure=failure),tempfile.TemporaryDirectory() as td:
+                root=Path(td)
+                def run(*args,**kwargs):
+                    if failure=='timeout':raise subprocess.TimeoutExpired('powershell.exe',90)
+                    if failure=='missing':raise FileNotFoundError('PowerShell not found')
+                    return SimpleNamespace(returncode=1)
+                with self.assertRaises(ValueError):self.launch(root,run)
+                state=maintenance.startup_status(root/'state')
+                self.assertFalse(state['pending']);self.assertFalse(state['ok']);self.assertTrue(state['message'])
 
 @unittest.skipIf(os.name=='nt','Container data links require Linux symlink semantics')
 class ContainerSeed(unittest.TestCase):
