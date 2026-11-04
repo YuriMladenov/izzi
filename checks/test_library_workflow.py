@@ -826,6 +826,19 @@ class LibraryWorkflow(unittest.TestCase):
             self.assertEqual(tasks.snapshot()['checks']['exit_code'],0)
         finally:tasks.close()
 
+    def test_maintenance_page_script_and_startup_status_are_available_without_archive(self):
+        self.start_server()
+        code,_,page=self.request('/__maintenance__')
+        self.assertEqual(200,code);self.assertIn(b'src="/__ui__/maintenance.js"',page)
+        code,headers,script=self.request('/__ui__/maintenance.js')
+        self.assertEqual(200,code)
+        self.assertTrue(headers['Content-Type'].startswith('application/javascript'))
+        self.assertEqual((server.webui.ASSETS/'maintenance.js').read_bytes(),script)
+        self.assertEqual(304,self.request('/__ui__/maintenance.js',headers={'If-None-Match':headers['ETag']})[0])
+        (self.state/'startup_task_result.json').write_text(json.dumps({'ok':True,'message':'Installed','account':'fixture'}),encoding='utf-8-sig')
+        code,_,body=self.request('/__maintenance__/status')
+        self.assertEqual(200,code);self.assertTrue(json.loads(body)['startup']['ok'])
+
     def test_webui_assets_help_and_empty_library(self):
         self.start_server()
         page=self.request('/')[2].decode()

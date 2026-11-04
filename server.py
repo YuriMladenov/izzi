@@ -557,7 +557,7 @@ class H(BaseHTTPRequestHandler):
         readonly=not self.admin_allowed()
         if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__','/__cleanup__','/__videos__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/','/__videos__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
             return self.sendb(b'Administrator required','text/plain; charset=utf-8',403)
-        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/videos.js','/__ui__/izzi-logo.svg'):
+        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/videos.js','/__ui__/maintenance.js','/__ui__/izzi-logo.svg'):
             filename=p.path.rsplit('/',1)[1]
             return self.send_cached((webui.ASSETS/filename).read_bytes(),'image/svg+xml' if filename.endswith('.svg') else 'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
         if p.path=='/__videos__':return self.videos_page()
