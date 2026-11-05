@@ -30,7 +30,9 @@ def install(archive,directory=None):
                 target.parent.mkdir(parents=True,exist_ok=True)
                 digest=hashlib.sha256()
                 with package.open(entry) as source,target.open('wb') as output:
-                    while chunk:=source.read(1024*1024):output.write(chunk);digest.update(chunk)
+                    while chunk:=source.read(1024*1024):
+                        if target.suffix.lower() in ('.js','.css') and b'\x00' in chunk:raise ValueError('Corrupt GeoGebra script contains NUL bytes: '+str(relative))
+                        output.write(chunk);digest.update(chunk)
                 manifest[str(relative)]={'bytes':target.stat().st_size,'sha256':digest.hexdigest()}
             # Preserve package notices even if they are above the runtime folder.
             for index,entry in enumerate(entries):

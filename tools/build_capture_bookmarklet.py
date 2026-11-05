@@ -1,8 +1,10 @@
 """Build the proxy runtime and standalone fallback from readable helpers."""
 from pathlib import Path
+import re
 root=Path(__file__).resolve().parents[1]
 path=root/'auto_book_capture_standalone.txt'
 source=path.read_text(encoding='utf8')
+source=re.sub(r"^javascript:globalThis\.__IZZI_CAPTURE_VERSION__='[a-f0-9]{12}';",'javascript:',source)
 legacy="const loadLesson=u=>new Promise(resolve=>{let done=false,timer;const finish=()=>{if(done)return;done=true;clearTimeout(timer);setTimeout(resolve,10000);};timer=setTimeout(finish,22000);f.onload=finish;f.src=u.href;});"
 source=source.replace(legacy,"const loadLesson=u=>captureLoadLesson(f,u);")
 if "f.id='izzi-offline-capture-frame'" not in source:
@@ -11,14 +13,16 @@ if "f.id='izzi-offline-capture-frame'" not in source:
     source=source.replace("document.getElementById('izzi-offline-lesson-picker')?.remove();console.error", "document.getElementById('izzi-offline-lesson-picker')?.remove();document.getElementById('izzi-offline-capture-frame')?.remove();console.error")
 if '/*IZZI_FLIPBOOK_START*/' not in source:
     source=source.replace('/*IZZI_NAV_START*/', '/*IZZI_FLIPBOOK_START*//*IZZI_FLIPBOOK_END*//*IZZI_NAV_START*/')
-for name,file in [('FLIPBOOK','capture_flipbook.js'),('NAV','capture_navigation.js'),('LINKS','capture_links.js'),('RESOURCES','capture_resources.js'),('STRICT','capture_strict.js')]:
+if '/*IZZI_PILOT_START*/' not in source:
+    source=source.replace('/*IZZI_FLIPBOOK_START*/','/*IZZI_PILOT_START*//*IZZI_PILOT_END*//*IZZI_FLIPBOOK_START*/')
+for name,file in [('PILOT','capture_pilot.js'),('FLIPBOOK','capture_flipbook.js'),('NAV','capture_navigation.js'),('LINKS','capture_links.js'),('RESOURCES','capture_resources.js'),('STRICT','capture_strict.js')]:
     start,end=f'/*IZZI_{name}_START*/',f'/*IZZI_{name}_END*/'
     prefix,remainder=source.split(start,1);_,suffix=remainder.split(end,1)
     helper=''.join((root/file).read_text(encoding='utf8').splitlines())
     source=prefix+start+helper+end+suffix
-path.write_text(''.join(source.splitlines())+'\n',encoding='utf8',newline='\n')
 
 runtime=''.join(source.splitlines()).removeprefix('javascript:').strip()
 import hashlib
 revision=hashlib.sha256(runtime.encode('utf8')).hexdigest()[:12]
-(root/'capture_book_runtime.js').write_text('globalThis.__IZZI_CAPTURE_RUNTIME_LOADED__=true;globalThis.__IZZI_CAPTURE_VERSION__='+repr(revision)+';\n'+runtime+'\n',encoding='utf8',newline='\n')
+path.write_text('javascript:globalThis.__IZZI_CAPTURE_VERSION__='+repr(revision)+';'+runtime+'\n',encoding='utf8',newline='\n')
+(root/'capture_book_runtime.js').write_text('globalThis.__IZZI_CAPTURE_RUNTIME_LOADED__=true;\n'+'globalThis.__IZZI_CAPTURE_VERSION__='+repr(revision)+';'+runtime+'\n',encoding='utf8',newline='\n')

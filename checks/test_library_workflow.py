@@ -826,6 +826,19 @@ class LibraryWorkflow(unittest.TestCase):
             self.assertEqual(tasks.snapshot()['checks']['exit_code'],0)
         finally:tasks.close()
 
+    def test_interactive_report_is_persistent_downloadable_and_admin_only(self):
+        import capture_pilot
+        lesson='https://bg.izzi.digital/DOS/1/8.html'
+        self.add(lesson,b'<body data-page-template="pdf_page"><izzi-block block-id="1" block-type="tinymce"></izzi-block></body>')
+        session=capture_pilot.begin(self.state,lesson,'123456789abc',self.mapping,self.archive)
+        capture_pilot.record(self.state,{'lesson':lesson,'revision':session['revision'],'key':'block:1','state':'verified','title':'Title & text','proof':{'assets':[lesson]}},self.mapping,self.archive)
+        self.start_server()
+        code,_,body=self.request('/__capture_report__?book=1')
+        self.assertEqual(200,code);self.assertIn('Title &amp; text',body.decode())
+        code,headers,body=self.request('/__capture_report__?book=1&download=1')
+        self.assertEqual(200,code);self.assertIn('attachment',headers['Content-Disposition']);self.assertFalse(json.loads(body)['offline_tested'])
+        self.assertEqual(403,self.request('/__capture_report__',headers={'Host':'192.168.1.20'})[0])
+
     def test_maintenance_page_script_and_startup_status_are_available_without_archive(self):
         self.start_server()
         code,_,page=self.request('/__maintenance__')

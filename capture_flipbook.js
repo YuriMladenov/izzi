@@ -51,47 +51,29 @@ await wait(250);
 if(doc.querySelector('izzi-block'))return [issue('Интерактивните панели на страницата не се инициализираха.')];
 const layout=frame.contentWindow.clientData?.['pdf-layout'],expected=layout?.data?.fields?.config?.blocks;
 if(!blocks.length&&((Array.isArray(expected)&&expected.length)||Object.keys(layout?.subBlocks?.items||{}).length))return [issue('Страницата има задачи, но няма разпознати интерактивни панели.')];
-let opened=0,slidesVisited=0,checkedOnce=false;
+let session;
+try{session=await capturePilotBegin(frame,lesson,skipAvailable);}catch(error){return [issue(error.message)];}
+let opened=0,checkedOnce=false;
 const check=()=>{const skip=checkedOnce||skipAvailable;checkedOnce=true;return captureStrictChecks(frame,lesson,ping,skip,true);};
+/* Prefetch declared files before opening lazy panels. */
+const files=await captureLessonFiles(frame,lesson,ping,{skipAvailable});
+if(files.issues?.length)return files.issues;
 for(const block of blocks){
-if(block.blockType==='go-to-link')continue;
+if(capturePilotPanelComplete(session,block.blockId)){session.resumed++;continue;}
+if(typeof frame.contentWindow.GGBApplet==='function')capturePilotGeoHook(frame.contentWindow);
 const button=Array.from(block.$el.querySelectorAll('button.cta-floater')).find(node=>node.closest('.izzi-block')===block.$el);
+if(block.blockType!=='go-to-link'){
 if(typeof block.openPDFBlock!=='function'||typeof block.closePDFBlock!=='function'||!button)return [issue('Непознат контрол за задача '+block.blockId+'. Нужна е ръчна проверка.')];
 if(!block.isPDFBlockOpen)button.click();
-await wait(400);
+await new Promise(resolve=>setTimeout(resolve,400));
 if(!block.isPDFBlockOpen)return [issue('Задача '+block.blockId+' не се отвори.')];
 opened++;
-/* Children of a PDF panel exist only after opening it. Rediscover after each navigation. */
-const seenSliders=new Set();
-const visitSliders=async root=>{
-for(const slider of captureFlipbookComponents(root).filter(vm=>vm.$options?.name==='objects-slider')){
-if(seenSliders.has(slider))continue;seenSliders.add(slider);
-const original=slider.currentSlide,count=slider.slideCount;
-if(!Number.isInteger(count)||count<1||count>200||typeof slider.next!=='function'||typeof slider.prev!=='function')return [issue('Непознат слайдер в задача '+block.blockId)];
-/* Navigation methods only; blocking steps stay blocked and are reported. */
-for(let step=0;slider.currentSlide>1&&step<count;step++){const old=slider.currentSlide;slider.prev();await wait(100);if(slider.currentSlide!==old-1)return [issue('Неуспешна навигация в слайдер '+slider.blockId)];}
-for(let index=1;index<=count;index++){
-if(slider.currentSlide!==index)return [issue('Не е отворен слайд '+index+' в задача '+block.blockId)];
-slidesVisited++;
-await wait(250);
-if(typeof captureGeoGebra==='function'){const failures=await captureGeoGebra(frame,lesson);if(failures.length)return failures;}
-const nested=await visitSliders(slider);if(nested.length)return nested;
-/* Capture resources while each slide's frame is still mounted. */
+}
+const failures=await capturePilotVisit(frame,block,check,session);if(failures.length)return failures;
+if(block.blockType!=='go-to-link'){block.closePDFBlock();await new Promise(resolve=>setTimeout(resolve,150));if(block.isPDFBlockOpen)return [issue('Задача '+block.blockId+' не се затвори.')];frame.contentWindow.__IZZI_PILOT_GEO__?.entries.clear();}
+}
 const failures=await check();if(failures.length)return failures;
-if(index<count){if(slider.nextDisabled)return [issue('Следващият слайд в задача '+block.blockId+' изисква отговор. Нужна е ръчна намеса.')];slider.next();await wait(150);}
-}
-/* Restore with prev(), which never submits answers. */
-for(let step=0;slider.currentSlide>original&&step<count;step++){slider.prev();await wait(50);}
-}
-return [];
-};
-const failures=await visitSliders(block);if(failures.length)return failures;
-const checked=await check();if(checked.length)return checked;
-block.closePDFBlock();await wait(150);
-if(block.isPDFBlockOpen)return [issue('Задача '+block.blockId+' не се затвори след проверката.')];
-}
-/* Includes the page image and thumbnails even for pages without task panels. */
-const failures=await check();
-await ping('flipbook-checked',lesson,{total:opened,failed:failures.length,reason:'Панели: '+opened+'; слайдове: '+slidesVisited});
-return failures;
+const result=await capturePilotRPC({action:'finish',lesson:lesson.href,revision:session.revision});
+await ping('flipbook-checked',lesson,{total:opened,failed:result.missing.length,reason:'Отворени панели: '+opened+'; повторно проверени от отчета: '+session.resumed});
+return result.available?[]:[issue('Непотвърдени интерактивности: '+result.missing.join(', '))];
 }

@@ -1,6 +1,7 @@
 /* Page metadata, lazy PDF panels, slider navigation and truthful failure reporting. */
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const helper=fs.readFileSync(path.join(__dirname,'../capture_flipbook.js'),'utf8');
+const pilot=fs.readFileSync(path.join(__dirname,'../capture_pilot.js'),'utf8');
 const standalone=fs.readFileSync(path.join(__dirname,'../auto_book_capture_standalone.txt'),'utf8');
 assert.equal(standalone.split('/*IZZI_FLIPBOOK_START*/')[1].split('/*IZZI_FLIPBOOK_END*/')[0],helper.split(/\r?\n/).join(''));
 const page=(id,number)=>({id,template:'pdf_page',name:'Untitled '+number,pdfPicture:[{pageNumber:number,image:'./datastore/book/p'+number+'.png',thumbnail:'./datastore/book/t'+number+'.png'}]});
@@ -25,7 +26,8 @@ async function panels({blocked=false,missing=false,empty=false}={}){
  const actions=[],checked=[],events=[];
  let panel,slider;
  const node={querySelectorAll:()=>[button]},button={closest:()=>node,click:()=>{actions.push('open');panel.isPDFBlockOpen=true;panel.$children=[slider];}};
- slider={$options:{name:'objects-slider'},$children:[],currentSlide:1,slideCount:3,blockId:2,nextDisabled:blocked,
+ const children=[11,12,13].map(blockId=>({$options:{name:'izzi-block'},blockId,blockType:'fill-in',$children:[]}));
+ slider={$options:{name:'objects-slider'},$children:children,slides:children.map(block=>({block,id:block.blockId})),currentSlide:1,slideCount:3,blockId:1,nextDisabled:blocked,
   next(){actions.push('next');this.currentSlide++;},prev(){actions.push('prev');this.currentSlide--;}};
  panel={$options:{name:'izzi-block'},$el:node,$children:[],canClose:true,isPDFBlockOpen:false,blockType:'objects-slider',blockId:1,
   openPDFBlock(){throw Error('must use the known open button')},closePDFBlock(){actions.push('close');this.isPDFBlockOpen=false;this.$children=[];}};
@@ -33,16 +35,17 @@ async function panels({blocked=false,missing=false,empty=false}={}){
  const doc={querySelectorAll:()=>empty?[]:[node],querySelector:()=>null};
  const layout={data:{fields:{config:{blocks:empty?[1]:[]}}}};
  const frame={contentDocument:doc,contentWindow:{clientData:{'pdf-layout':layout}}};
- const capture=vm.runInNewContext(helper+';captureFlipbookPage',{
-  URL,Map,Set,setTimeout:fn=>{queueMicrotask(fn);return 1;},
-  captureGeoGebra:async()=>[],
+ const inventory=[{key:'block:1',panel:'1',kind:'objects-slider'},...children.map(c=>({key:'block:'+c.blockId,panel:'1',kind:'fill-in'}))];
+ const capture=vm.runInNewContext(pilot+';capturePilotRPC=async data=>{if(data.action==="begin")return {revision:"v1",inventory,verified:[]};return {capture:true,available:true,missing:[]};};'+helper+';captureFlipbookPage',{
+  inventory,WeakMap,Reflect,__IZZI_CAPTURE_VERSION__:'123456789abc',URL,Map,Set,setTimeout:fn=>{queueMicrotask(fn);return 1;},
+  captureLessonFiles:async()=>({issues:[]}),captureResourceAssets:()=>[],captureGeoGebra:async()=>[],
   captureStrictChecks:async(f,l,p,skip,inside)=>{assert(inside);checked.push(panel.isPDFBlockOpen?slider.currentSlide:'closed');return missing?[{kind:'image',url:l.href,reason:'missing image'}]:[];}
  });
  const result=await capture(frame,new URL('https://bg.izzi.digital/DOS/1/101.html'),async(kind,l,extra)=>events.push({kind,extra}),false);
  if(empty){assert.equal(result.length,1);assert(result[0].reason.includes('няма разпознати'));return;}
  if(blocked){assert.equal(result.length,1);assert(result[0].reason.includes('изисква отговор'));assert(!actions.includes('next'));assert(!actions.includes('close'));return;}
  if(missing){assert.equal(result.length,1);assert.equal(result[0].reason,'missing image');assert(!actions.includes('next'));assert(!actions.includes('close'));return;}
- assert.equal(result.length,0);assert.deepEqual(checked.slice(0,3),[1,2,3]);assert.equal(checked.at(-1),'closed');
+ assert.equal(result.length,0);assert.deepEqual([...new Set(checked.slice(0,-1))],[1,2,3]);assert.equal(checked.at(-1),'closed');
  assert.equal(slider.currentSlide,1);assert.deepEqual(actions,['open','next','next','prev','prev','close']);
  assert(events.some(row=>row.kind==='flipbook-checked'&&row.extra.total===1));
 }

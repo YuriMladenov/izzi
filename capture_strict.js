@@ -59,6 +59,7 @@ try{await captureLoadLesson(frame,lesson);const issues=await captureStrictChecks
 }));
 }
 };
+if(typeof capturePilotRPC==='function')button(controls,'Запази отчета за интерактивностите',()=>locked(async()=>{const response=await fetch(O+'/__offline_capture__/pilot?'+new URLSearchParams({book:B}),{cache:'no-store'});if(!response.ok)throw new Error('Отчетът е недостъпен');const blob=new Blob([JSON.stringify(await response.json(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='izzi-interactions-'+B+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}));
 button(controls,'Запази отчета (JSON)',()=>{const blob=new Blob([JSON.stringify({created:new Date().toISOString(),summary,resources:[...captureDeferredResources.values()]},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='izzi-capture-report.json';panel.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 button(controls,'Затвори',()=>{if(!busy){host.remove();resolve();}});
 render();document.body.appendChild(host);
@@ -119,12 +120,12 @@ for(const node of doc.querySelectorAll('script[src],link[rel="stylesheet"][href]
 }catch{}
 };scan(frame.contentWindow);return [...urls];
 }
-async function captureArchiveBarrier(frame,lesson){
+async function captureArchiveBarrier(frame,lesson,options={}){
 let last;
 for(let attempt=0;attempt<20;attempt++){
 const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
 try{const response=await fetch(O+'/__offline_capture__/lesson_status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lesson:lesson.href,assets:captureResourceAssets(frame,lesson),geogebra_blocks:typeof captureGeoGebraBindings==='function'?captureGeoGebraBindings(frame,lesson).map(row=>row.block):[]}),cache:'no-store',signal:controller.signal});
-if(!response.ok)throw new Error('Capture proxy не потвърди пълнотата на урока');last=await response.json();if(last.capture!==true)throw new Error('Нужен е обновен capture proxy');rememberCaptureIssues(lesson,last.warnings||[]);if(last.available)return [];
+if(!response.ok)throw new Error('Capture proxy не потвърди пълнотата на урока');last=await response.json();if(last.capture!==true)throw new Error('Нужен е обновен capture proxy');rememberCaptureIssues(lesson,last.warnings||[]);if(last.available&&(!options.quietMs||last.quiet_ms>=options.quietMs))return [];
 if((last.missing||[]).length&&!last.pending?.length&&last.quiet_ms>=1000)break;
 }finally{clearTimeout(timer);}
 await new Promise(resolve=>setTimeout(resolve,500));
@@ -187,21 +188,21 @@ const doc=frame.contentDocument,app=doc?.querySelector?.('.app-main');
 if(!doc||frame.contentWindow?.location?.pathname!==lesson.pathname||(doc.readyState==='loading')||(app&&!app.classList?.contains('app-main--ready')))return [{kind:'page',url:lesson.href,reason:'Приложението на урока не завърши зареждането. Провери грешките и достъпа в оригиналния сайт.'}];
 }catch(error){return [{kind:'page',url:lesson.href,reason:error.message}];}
 if(!insideFlipbook&&typeof captureFlipbookPage==='function'&&frame.contentDocument.body?.getAttribute('data-page-template')==='pdf_page')return captureFlipbookPage(frame,lesson,ping,skipAvailable);
-if(typeof captureGeoGebra==='function')issues.push(...await captureGeoGebra(frame,lesson));
-const checks=await Promise.allSettled([captureLessonImages(frame,lesson,ping,{skipAvailable}),captureLessonFiles(frame,lesson,ping,{skipAvailable}),captureLessonMedia(frame,lesson,ping,{skipAvailable})]);
+if(typeof captureGeoGebra==='function')issues.push(...await captureGeoGebra(frame,lesson,{visibleOnly:insideFlipbook}));
+const checks=await Promise.allSettled([captureLessonImages(frame,lesson,ping,{skipAvailable,settled:insideFlipbook}),captureLessonFiles(frame,lesson,ping,{skipAvailable}),captureLessonMedia(frame,lesson,ping,{skipAvailable})]);
 for(const result of checks){
 if(result.status==='fulfilled')issues.push(...(result.value.issues||[]));
 else issues.push({kind:'page',url:lesson.href,reason:result.reason.message});
 }
-try{const result=await captureLessonLinks(frame,lesson,ping,{skipAvailable});issues.push(...(result.issues||[]));}catch(error){issues.push({kind:'page',url:lesson.href,reason:error.message});}
+try{const result=await captureLessonLinks(frame,lesson,ping,{skipAvailable});issues.push(...(result.issues||[]));if(typeof capturePilotSessions!=='undefined'){const session=capturePilotSessions.get(frame);if(session)session.linked=new Set([...(session.linked||[]),...(result.verified||[])]);}}catch(error){issues.push({kind:'page',url:lesson.href,reason:error.message});}
 try{
-let missing=await captureArchiveBarrier(frame,lesson);
+let missing=await captureArchiveBarrier(frame,lesson,insideFlipbook?{quietMs:2000}:{});
 /* Other checks already retry images/media/apps; bound extra recovery of generic assets. */
 let recovered=false;
 for(const issue of missing.filter(row=>row.kind==='asset').slice(0,4)){
 try{if(await checkDeferredResource({...issue,lesson:lesson.href},true))recovered=true;}catch{}
 }
-if(recovered)missing=await captureArchiveBarrier(frame,lesson);
+if(recovered)missing=await captureArchiveBarrier(frame,lesson,insideFlipbook?{quietMs:2000}:{});
 for(const issue of missing){const existing=issues.find(row=>captureResourceKey(row.url,lesson.href)===captureResourceKey(issue.url,lesson.href));if(!existing)issues.push(issue);else if(issue.reason.startsWith('HTTP ')&&!existing.reason.includes('HTTP '))existing.reason+=' · '+issue.reason;}
 }catch(error){issues.push({kind:'page',url:lesson.href,reason:error.message});}
 rememberCaptureIssues(lesson,issues);

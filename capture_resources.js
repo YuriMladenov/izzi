@@ -1,8 +1,9 @@
 /* Activate only the GeoGebra start controls, never arbitrary lesson buttons. */
-async function captureGeoGebra(frame,lesson){
+async function captureGeoGebra(frame,lesson,options={}){
 captureGeoGebraBindings(frame,lesson);
 const issues=[];
 for(const root of frame.contentDocument.querySelectorAll('[id^="geogebra-"].int')){
+if(options.visibleOnly&&root.getClientRects&&root.getClientRects().length===0)continue;
 if(root.classList.contains('ggc--loaded')||root.__izziGeoCaptureStarted)continue;
 const button=root.querySelector('.int-overlay > button.cta');
 if(!button||button.disabled)continue;
@@ -40,7 +41,7 @@ if(scrollIncomplete)scrollFailure='Превъртането не достигн�
 win.scrollTo(startX,startY);
 for(const [node,name,value,priority] of styles.reverse()){if(value)node.style.setProperty(name,value,priority);else node.style.removeProperty(name);}
 }
-const seen=new Map(),failed=new Map();let inline=0;
+const seen=new Map(),failed=new Map(),optionalImages=new Set();let inline=0;
 const decode=text=>{const area=document.createElement('textarea');area.innerHTML=text;return area.value.replace(/\\u002[fF]/g,'/').replace(/\\\//g,'/').replace(/\\["']/g,'"');};
 const add=value=>{if(!value)return;if(/^(data:|blob:)/i.test(value)){inline++;return;}let url;try{url=new URL(value,doc.baseURI||lesson.href)}catch{return}if(!/\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(?:$|[?#])/i.test(url.href))return;if(!/^https?:$/.test(url.protocol))return;url.hash='';seen.set(url.href,url);};
 const pageMeta=typeof selectionMetadata!=='undefined'?selectionMetadata.get(lesson.pathname)?.flipbook:null;
@@ -48,12 +49,12 @@ for(const value of [pageMeta?.image,pageMeta?.thumbnail])if(value)add(value);
 const discover=()=>{for(const node of doc.querySelectorAll('img,source,block-image')){if(node.currentSrc)add(node.currentSrc);for(const attr of ['src','data-src','data-original','data-lazy-src'])add(node.getAttribute(attr));for(const attr of ['srcset','data-srcset'])for(const part of (node.getAttribute(attr)||'').split(','))add(part.trim().split(/\s+/)[0]);}
 const text=decode(doc.documentElement.outerHTML);for(const match of text.matchAll(/<(?:img|block-image)\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi))add(match[1]);};
 const status=async url=>{const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const reply=await fetch(O+'/__offline_capture__/image_status?'+new URLSearchParams({url:url.href}),{cache:'no-store',signal:controller.signal});if(!reply.ok)throw new Error('Capture proxy не потвърди архива');
-const result=await reply.json();return result.available===true;}finally{clearTimeout(timer)}};
-const load=async url=>{if(!/(^|\.)izzi\.digital$/i.test(url.hostname)){if(await status(url)){failed.delete(url.href);return;}failed.set(url.href,'външен ресурс: нужен е повторен опит от панела');return;}if(options.skipAvailable&&await status(url))return;let reason='';for(let attempt=0;attempt<2;attempt++){try{await new Promise((resolve,reject)=>{const image=new frame.contentWindow.Image();let settled=false;
+const result=await reply.json();if(result.warning){optionalImages.add(url.href);if(typeof rememberCaptureIssues==='function')rememberCaptureIssues(lesson,[{kind:'image',url:url.href,reason:result.warning,severity:'warning'}]);return true;}return result.available===true;}finally{clearTimeout(timer)}};
+const load=async url=>{if(!/(^|\.)izzi\.digital$/i.test(url.hostname)){if(await status(url)){failed.delete(url.href);return;}failed.set(url.href,'външен ресурс: нужен е повторен опит от панела');return;}const available=await status(url);if(optionalImages.has(url.href)||(options.skipAvailable&&available))return;let reason='';for(let attempt=0;attempt<2;attempt++){try{await new Promise((resolve,reject)=>{const image=new frame.contentWindow.Image();let settled=false;
 const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);image.onload=null;image.onerror=null;error?reject(error):resolve()};
 const timer=setTimeout(()=>finish(new Error('image timeout')),20000);image.onload=()=>finish(image.naturalWidth>0?null:new Error('невалидно изображение'));image.onerror=()=>finish(new Error('изображението не се зареди'));
 const fresh=new URL(url.href);fresh.searchParams.set('__izzi_offline_recover',Date.now().toString(36)+'_'+attempt);image.src=fresh.href;});if(!await status(url))throw new Error('няма годен body в архива');failed.delete(url.href);return;}catch(error){reason=error.message;}}failed.set(url.href,reason);};if(!await status(lesson))throw new Error('HTML на урока не е записан в архива');let checked=new Set(),stable=0;for(let round=0;round<6&&stable<2;round++){discover();
-const pending=[...seen.values()].filter(url=>!checked.has(url.href));stable=pending.length?0:stable+1;let index=0;await Promise.all(Array.from({length:Math.min(4,pending.length)},async()=>{while(index<pending.length){const url=pending[index++];checked.add(url.href);await load(url);}}));await new Promise(resolve=>setTimeout(resolve,1000));}discover();for(const url of seen.values())if(!checked.has(url.href))failed.set(url.href,'появи се след проверката');if(scrollIncomplete){await ping('scroll-incomplete',lesson,{reason:scrollFailure});}for(const [url,reason] of failed){console.warn('IZZI IMAGE MISSING',lesson.pathname,url,reason);await ping('image-failed',lesson,{asset:url,reason});}await ping('images-checked',lesson,{total:seen.size,failed:failed.size});return {total:seen.size,failed:failed.size+(scrollIncomplete?1:0),issues:[...[...failed].map(([url,reason])=>({kind:'image',url,reason})),...(scrollIncomplete?[{kind:'page',url:lesson.href,reason:scrollFailure}]:[])]};}
+const pending=[...seen.values()].filter(url=>!checked.has(url.href));stable=pending.length?0:stable+1;let index=0;await Promise.all(Array.from({length:Math.min(4,pending.length)},async()=>{while(index<pending.length){const url=pending[index++];checked.add(url.href);await load(url);}}));await new Promise(resolve=>setTimeout(resolve,options.settled?250:1000));}discover();for(const url of seen.values())if(!checked.has(url.href))failed.set(url.href,'появи се след проверката');if(scrollIncomplete){await ping('scroll-incomplete',lesson,{reason:scrollFailure});}for(const [url,reason] of failed){console.warn('IZZI IMAGE MISSING',lesson.pathname,url,reason);await ping('image-failed',lesson,{asset:url,reason});}await ping('images-checked',lesson,{total:seen.size,failed:failed.size});return {total:seen.size,failed:failed.size+(scrollIncomplete?1:0),issues:[...[...failed].map(([url,reason])=>({kind:'image',url,reason})),...(scrollIncomplete?[{kind:'page',url:lesson.href,reason:scrollFailure}]:[])]};}
 function captureGgbURL(value,base){
 const url=new URL(value,base);
 if(['bg.izzi.digital','api.izzi.digital'].includes(url.hostname)&&/\.ggb$/i.test(url.pathname))url.pathname=url.pathname.replace(/^\/DOS\/\d+\/(\d+\/(?:publication\/\d+|shared)\/files\/)/,'/datastore/$1');

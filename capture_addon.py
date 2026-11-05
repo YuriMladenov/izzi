@@ -20,6 +20,7 @@ import archive_db
 import geogebra_runtime
 import geogebra_capture
 import bundled_assets
+import capture_pilot
 from archive_storage import blob_key
 
 def running():
@@ -64,6 +65,31 @@ def request(flow:http.HTTPFlow):
 def _request(flow):
     global MISSING_ONLY,UPDATE_BOOK,UPDATE_UNTIL
     p=urlparse(flow.request.pretty_url)
+    if p.hostname==SOURCE_HOST and p.path=='/__offline_capture__/pilot':
+        headers={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}
+        try:
+            if flow.request.method=='GET':
+                book=(parse_qs(p.query).get('book') or [''])[0]
+                result=capture_pilot.report(STATE_DIR,book)
+            elif flow.request.method=='POST':
+                origin=flow.request.headers.get('Origin')
+                if origin and origin not in ('https://bg.izzi.digital','http://bg.izzi.digital'):
+                    flow.response=http.Response.make(403,b'{"error":"Capture origin required"}',headers);return
+                raw=flow.request.content or b''
+                if len(raw)>256*1024:raise ValueError('Pilot request too large')
+                data=json.loads(raw)
+                if not isinstance(data,dict):raise ValueError('Invalid pilot request')
+                mapping=load_json(URL_MAP_FILE,{})
+                if data.get('action')=='begin':result=capture_pilot.begin(STATE_DIR,data.get('lesson'),data.get('version'),mapping,ARCHIVE_DIR,data.get('page_number'),data.get('viewer'),data.get('page_assets'))
+                elif data.get('action')=='item':result=capture_pilot.record(STATE_DIR,data,mapping,ARCHIVE_DIR)
+                elif data.get('action')=='finish':result=capture_pilot.finish(STATE_DIR,data,mapping,ARCHIVE_DIR)
+                else:raise ValueError('Unknown pilot action')
+            else:
+                flow.response=http.Response.make(405,b'{"error":"GET or POST required"}',{**headers,'Allow':'GET, POST'});return
+            flow.response=http.Response.make(200,json.dumps(result,ensure_ascii=False).encode(),headers)
+        except (OSError,ValueError,AttributeError,TypeError,capture_pilot.sqlite3.Error) as error:
+            flow.response=http.Response.make(400,json.dumps({'error':str(error)},ensure_ascii=False).encode(),headers)
+        return
     if p.hostname==SOURCE_HOST and p.path=='/__offline_capture__/book_capture.js':
         headers={'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}
         if flow.request.method!='GET':
@@ -135,7 +161,8 @@ def _request(flow):
                 good=lambda r:usable_body(r,ARCHIVE_DIR,ext)
                 row=pick(mapping.get(canonical_url(requested),[]),good) if exact else find(mapping,target.hostname or '',target.path,target.query,good)
             fallback=not exact and (bundled_assets.asset(target.hostname,target.path) or geogebra_runtime.asset(target.hostname,target.path))
-            body=json.dumps({'capture':True,'available':bool(row or fallback)}).encode()
+            from resource_policy import optional_reason
+            body=json.dumps({'capture':True,'available':bool(row or fallback),'warning':optional_reason(requested)}).encode()
             flow.response=http.Response.make(200,body,{'Content-Type':'application/json','Cache-Control':'no-store'})
         except (OSError,ValueError):
             flow.response=http.Response.make(503,b'{"capture":true,"available":false}',{'Content-Type':'application/json'})

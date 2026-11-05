@@ -40,6 +40,14 @@ class ValidationCache(unittest.TestCase):
     def test_extension_is_part_of_cache_key(self):
         self.assertTrue(usable_body(self.record,self.root,'.html'))
         self.assertFalse(usable_body(self.record,self.root,'.js'))
+    def test_script_holes_beyond_header_are_rejected_and_repair_invalidates_cache(self):
+        self.file.write_bytes(b'var x=1;\n'+b' '*70000+b'\0'*100)
+        self.record['size']=self.file.stat().st_size
+        self.assertFalse(usable_body(self.record,self.root,'.js'))
+        self.file.write_bytes(b'var x=1;\n'+b' '*70100)
+        self.assertTrue(usable_body(self.record,self.root,'.js'))
+        with patch.object(Path,'open',side_effect=AssertionError('repeat read')):
+            self.assertTrue(usable_body(self.record,self.root,'.js'))
     def test_geogebra_validation_reuses_zip_check(self):
         with zipfile.ZipFile(self.file,'w') as z:z.writestr('geogebra.xml','<geogebra/>')
         self.record['size']=self.file.stat().st_size

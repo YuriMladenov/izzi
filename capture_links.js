@@ -23,7 +23,7 @@ const scan=(doc,base)=>{base=doc.baseURI||base;for(const node of doc.querySelect
 scan(frame.contentDocument,lesson.href);
 /* PDF link panels expose their destination on the mounted block, not an anchor. */
 for(const node of frame.contentDocument.querySelectorAll('.izzi-block[data-type="go-to-link"][href]'))add(node.getAttribute('href'),frame.contentDocument.baseURI||lesson.href);
-let failed=0;const issues=[];
+let failed=0;const issues=[],verified=[];
 for(const candidate of found.values()){
 let url=candidate;
 if(options.targets&&!options.targets.some(value=>{try{return captureBlockURL(value,lesson.href).href===url.href;}catch{return false;}}))continue;
@@ -36,7 +36,7 @@ if(!id||!/^[-\w]{11}$/.test(id))continue;
 await ping('youtube-start',lesson,{asset:'https://www.youtube.com/watch?v='+id});
 let state;for(let attempt=0;attempt<90;attempt++){const response=await fetch(O+'/__offline_capture__/youtube?'+new URLSearchParams({id,...(attempt===0?{start:'1'}:{})}),{cache:'no-store'});state=await response.json();if(state.available)break;if(state.state==='failed')throw new Error(state.error);await delay(10000);}
 if(!state?.available)throw new Error('YouTube видеото не е записано в срока за изчакване');
-await ping('youtube-checked',lesson,{asset:'https://www.youtube.com/watch?v='+id});continue;
+verified.push('https://www.youtube.com/watch?v='+id);await ping('youtube-checked',lesson,{asset:'https://www.youtube.com/watch?v='+id});continue;
 }
 await ping('link-register',lesson,{asset:url.href});
 /* Confirm this exact API response: an archived bg alias must not mask an API error. */
@@ -47,7 +47,7 @@ if(!original||original.href===url.href)throw error;
 url=original;await ping('link-register',lesson,{asset:url.href});await captureConfirmBlockPage(url);
 }
 }
-const request=await fetch(O+'/__offline_capture__/link_status?'+new URLSearchParams({url:url.href}),{cache:'no-store'});if(!request.ok)throw new Error('Регистрацията на връзката е отказана');const initialStatus=await request.json();if(options.skipAvailable&&initialStatus.available){if(typeof rememberCaptureIssues==='function')rememberCaptureIssues(lesson,initialStatus.warnings||[]);await ping('link-checked',lesson,{asset:url.href});continue;}
+const request=await fetch(O+'/__offline_capture__/link_status?'+new URLSearchParams({url:url.href}),{cache:'no-store'});if(!request.ok)throw new Error('Регистрацията на връзката е отказана');const initialStatus=await request.json();if(options.skipAvailable&&initialStatus.available){if(typeof rememberCaptureIssues==='function')rememberCaptureIssues(lesson,initialStatus.warnings||[]);verified.push(url.href);await ping('link-checked',lesson,{asset:url.href});continue;}
 if(/\.(?:pdf|exe|zip|rar|7z|sb[23]|docx?|xlsx?|pptx?|png|jpe?g|mp[34]|webm|ggb)(?:$)/i.test(url.pathname)){
 const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),240000);try{await fetch(url.href,{mode:'no-cors',credentials:'include',cache:'no-store',signal:controller.signal});}finally{clearTimeout(timer);}
 }else{
@@ -58,8 +58,8 @@ try{const doc=child.contentDocument;if(doc){const scroll=child.contentWindow;for
 }
 let checked;for(let attempt=0;attempt<20;attempt++){const response=await fetch(O+'/__offline_capture__/link_status?'+new URLSearchParams({url:url.href}),{cache:'no-store'});checked=await response.json();if(checked.available)break;for(const missing of (checked.missing||[]).slice(0,4)){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);try{await fetch(missing,{mode:'no-cors',credentials:'include',cache:'no-store',signal:controller.signal});}catch{}finally{clearTimeout(timer);}}await delay(500);}
 if(typeof rememberCaptureIssues==='function'){rememberCaptureIssues(lesson,checked?.warnings||[]);rememberCaptureIssues(lesson,(checked?.missing||[]).map(value=>({kind:'asset',url:value,reason:'Липсва зависимост на '+url.href})));}if(checked?.limit_reached)throw new Error('Превишен е лимитът от 2000 зависимости на връзка');if(!checked?.available)throw new Error((checked?.problem?checked.problem+' ':'')+'Липсват зависимости: '+(checked?.missing||[]).join(', '));
-await ping('link-checked',lesson,{asset:url.href,total:checked.total});
+verified.push(url.href);await ping('link-checked',lesson,{asset:url.href,total:checked.total});
 }catch(error){failed++;issues.push({kind:/^(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)$/.test(url.hostname)?'youtube':'link',url:url.href,reason:error.message});console.warn('IZZI LINK FAILED',url.href,error);await ping('link-failed',lesson,{asset:url.href,reason:error.message});}finally{child?.remove();}
 }
-return {failed,total:found.size,issues};
+return {failed,total:found.size,issues,verified};
 }

@@ -554,6 +554,29 @@ class H(BaseHTTPRequestHandler):
                 data={'update':project_maintenance.updates.snapshot(),'managed':os.environ.get('IZZI_MANAGED_LAUNCH')=='1','windows':os.name=='nt','startup':project_maintenance.startup_status(STATE_DIR)}
                 return self.sendb(json.dumps(data).encode(),'application/json')
             return self.maintenance_page()
+        if p.path=='/__capture_report__':
+            if not self.admin_allowed():return self.sendb(b'Administrator required','text/plain',403)
+            import capture_pilot
+            try:report=capture_pilot.report(STATE_DIR,(parse_qs(p.query).get('book') or [None])[0])
+            except (ValueError,OSError,capture_pilot.sqlite3.Error):return self.sendb(b'Capture report unavailable','text/plain',503)
+            if parse_qs(p.query).get('download')==['1']:
+                return self.sendb(json.dumps(report,ensure_ascii=False).encode(),'application/json; charset=utf-8',extra={'Content-Disposition':'attachment; filename="izzi-interactions.json"'})
+            kinds={'objects-slider':'Слайдер','slide':'Слайд','geogebra':'GeoGebra','fill-in':'Попълване','multiple-choice':'Избор на отговор','dragndrop':'Влачене','tinymce':'Текст','image':'Изображение','audio':'Аудио','video':'Видео','framer':'Вложено приложение','go-to-link':'Препратка'}
+            labels={'discovered':'Открита','opened':'Отворена','saved':'Ресурсите са записани','verified':'Потвърдена при capture','failed':'Грешка','manual':'Нужна е ръчна проверка'}
+            query='?book='+html.escape((parse_qs(p.query).get('book') or [''])[0])+'&amp;' if parse_qs(p.query).get('book') else '?'
+            content='<h1>Отчет за интерактивностите</h1><p>Отчетът се запазва между рестартиранията. Потвърждението при capture не доказва офлайн оценяване от външни сървъри. При нов обход наличните ресурси се проверяват отново.</p><p><a href="'+query+'download=1">Изтегли JSON</a> · <a href="'+html.escape(self.path,quote=True)+'">Обнови отчета</a></p>'
+            if not report['pages']:content+='<p>Все още няма отчет. Стартирай обход на прелистващ се учебник с актуалния bookmarklet.</p>'
+            for page in report['pages']:
+                target=page['viewer']+'?page='+str(page['page_number'])+'&centrespread=0' if page.get('viewer') and page.get('page_number') is not None else page['lesson']
+                content+='<section><h2><a href="'+html.escape(target,quote=True)+'">'+html.escape((page.get('book_title') or 'Учебник '+page['book'])+' · '+(('Страница '+str(page['page_number'])) if page.get('page_number') is not None else page['lesson']))+'</a></h2><p>'+('Ресурсите са потвърдени' if page['state']=='complete' else 'Неприключила проверка')+'</p><table><thead><tr><th>Задача / слайд</th><th>Тип</th><th>Състояние</th><th>Причина</th></tr></thead><tbody>'
+                names={item['key']:item['title'] for item in page['items']}
+                for item in page['items']:
+                    title=item['title']
+                    if title==item['kind']+' #'+item['key'].split(':')[-1]:title=kinds.get(item['kind'],item['kind'])+' — без заглавие'
+                    parent=names.get(item['parent'],'')
+                    content+='<tr>'+''.join('<td>'+html.escape(str(value))+'</td>' for value in (title+(' ('+parent+')' if parent else ''),kinds.get(item['kind'],item['kind']),labels.get(item['state'],item['state']),item['reason']))+'</tr>'
+                content+='</tbody></table></section>'
+            return self.sendb(self.ui(content,'Отчет за интерактивностите','capture-report').encode(),'text/html; charset=utf-8')
         readonly=not self.admin_allowed()
         if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__','/__cleanup__','/__videos__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/','/__videos__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
             return self.sendb(b'Administrator required','text/plain; charset=utf-8',403)
@@ -633,12 +656,15 @@ class H(BaseHTTPRequestHandler):
                 page=page.replace('<table>', '<input type="hidden" name="token" value="'+html.escape(operations.tasks.token,quote=True)+'"><table>',1)
                 page=page.replace('<table>','<div class="table-wrap"><table>').replace('</table>','</table></div>')
                 return self.sendb(self.ui(page,'Подреждане').encode(),'text/html; charset=utf-8')
+            import capture_pilot
+            try:pilot_links=capture_pilot.display_links(STATE_DIR,bid)
+            except (OSError,ValueError,capture_pilot.sqlite3.Error):pilot_links={}
             groups={}
             for x in ls:
                 if not x['hidden']:groups.setdefault(x.get('module') or '',[]).append(x)
             sections=[]
             for module,lessons in groups.items():
-                items=''.join('<li data-search-item data-search-text="%s"%s><a href="%s">%s</a> <small>(%s)</small></li>'%(html.escape(module,quote=True),' class="original-number"' if x.get('original_number') else '',html.escape(x['path']),html.escape(x['title']),html.escape(x['id'])) for x in lessons)
+                items=''.join('<li data-search-item data-search-text="%s"%s><a href="%s">%s</a> <small>(%s)</small></li>'%(html.escape(module,quote=True),' class="original-number"' if x.get('original_number') else '',html.escape(pilot_links.get(x['path'],x['path']),quote=True),html.escape(x['title']),html.escape(x['id'])) for x in lessons)
                 heading=module or ('Уроци без записан раздел' if any(groups) else 'Уроци')
                 sections.append('<section class="lesson-section"><h2>%s</h2><ol class="lesson-list">%s</ol></section>'%(html.escape(heading),items))
             items=''.join(sections)

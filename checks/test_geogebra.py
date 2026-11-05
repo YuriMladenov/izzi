@@ -56,6 +56,13 @@ class GeoGebra(unittest.TestCase):
         self.assertIsNone(runtime.asset('evil.example',runtime.PREFIX+'web3d/web3d.nocache.js'))
         self.add(runtime.PREFIX+'web3d/web3d.nocache.js',b'/* archived original */',content_type='application/javascript')
         self.assertEqual(b'/* archived original */',self.request(runtime.PREFIX+'web3d/web3d.nocache.js')[2])
+    def test_sparse_runtime_script_is_not_usable_and_bad_zip_preserves_installation(self):
+        self.install();entry=runtime.DIRECTORY/'web3d/web3d.nocache.js';previous=entry.read_bytes()
+        with self.assertRaisesRegex(ValueError,'NUL bytes'):install_geogebra.install(self.bundle(body=b'var x=1;'+b'\0'*2000),runtime.DIRECTORY.parent.parent)
+        self.assertEqual(previous,entry.read_bytes())
+        module=runtime.DIRECTORY/'web3d/A.cache.js';module.write_bytes(b'var x=1;'+b'\0'*70000)
+        self.assertTrue(runtime.installed())
+        self.assertIsNone(runtime.asset('bg.izzi.digital',runtime.PREFIX+'web3d/A.cache.js'))
     def test_ggb_is_a_real_geogebra_zip_and_replays_with_correct_mime(self):
         buffer=io.BytesIO()
         with zipfile.ZipFile(buffer,'w') as package:package.writestr('geogebra.xml','<?xml version="1.0"?><geogebra format="5.0"></geogebra>')

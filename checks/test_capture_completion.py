@@ -62,6 +62,13 @@ class Completion(unittest.TestCase):
         self.assertFalse(result['available']);self.assertEqual(required,result['missing'][0]['url'])
         self.add(optional,b'{"version":3}')
         self.assertEqual([],completion.status(self.lesson,[],self.mapping,self.archive)['warnings'])
+    def test_classroom_menu_icon_is_optional_but_lesson_images_are_required(self):
+        icon='https://bg.izzi.digital/DOS/1202425/profil/dist/izzi/images/svg/no-classrooms.svg'
+        completion.watch(icon,'GET',self.lesson,'menu');self.settled()
+        report=completion.status(self.lesson,[],self.mapping,self.archive)
+        self.assertTrue(report['available']);self.assertEqual([icon],[r['url'] for r in report['warnings']])
+        image='https://bg.izzi.digital/datastore/15/publication/1202425/pictures/no-classrooms.svg'
+        self.assertFalse(completion.status(self.lesson,[image],self.mapping,self.archive)['available'])
 
     def test_linked_apps_share_optional_policy_but_root_is_required(self):
         import external_links
