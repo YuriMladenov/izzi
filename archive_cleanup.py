@@ -11,7 +11,10 @@ from replay_resolver import find,usable_body,complete_body
 LOCK=threading.RLock()
 
 def read(path):
-    with path.open(encoding='utf8') as stream:return json.load(stream)
+    try:
+        with path.open(encoding='utf-8-sig') as stream:return json.load(stream)
+    except (ValueError,OSError) as error:
+        raise ValueError('Не може да се прочете '+str(path)+': '+str(error)) from error
 
 def contained(root,path):
     if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):return False
@@ -27,7 +30,7 @@ def report(archive,state,include_incomplete=False):
     books=load(state/'books.json',{}) if using_db else read(state/'books.json')
     if not isinstance(mapping,Mapping) or not isinstance(books,Mapping):raise ValueError('Невалиден индекс: почистването е блокирано.')
     if books and not mapping:raise ValueError('Празен URL индекс при налични учебници: почистването е блокирано.')
-    protected=set();stamps=[]
+    protected=set();stamps=[];warnings=[]
     if using_db:
         db=state/archive_db.DB_NAME
         if not contained(state,db):raise ValueError('Невалиден път на SQLite индекса.')
@@ -47,7 +50,15 @@ def report(archive,state,include_incomplete=False):
         if 'cleanup_trash' in path.relative_to(state).parts:continue
         if path.parent==state and (path.name=='storage_migration_report.json' or (using_db and path.name in archive_db.NAMES)):continue
         if not contained(state,path):raise ValueError('Символни връзки в state: почистването е блокирано.')
-        data=read(path);stat=path.stat();stamps.append((str(path.relative_to(state)),stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns))
+        stat=path.stat();stamps.append((str(path.relative_to(state)),stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns))
+        try:data=read(path)
+        except ValueError:
+            # These two diagnostics contain URLs/events, never archive body keys.
+            # Keep the broken file; do not bypass integrity checks for indexes/manifests.
+            if path.parent==state and path.name in ('capture_session.json','capture_observed.json'):
+                warnings.append('Нечетим диагностичен журнал: '+path.name+'. Файлът е запазен и не участва в почистването.')
+                continue
+            raise
         protect(data)
     protect(dict(books.items()))
     for rows in mapping.values():
@@ -126,7 +137,7 @@ def report(archive,state,include_incomplete=False):
     files=sorted(selected.values(),key=lambda x:(x['root'],x['path']))
     if using_db and stamps[0][1]!=archive_db.revision(state/archive_db.DB_NAME):raise ValueError('Индексът се промени. Генерирай нов отчет.')
     fingerprint=hashlib.sha256(json.dumps([stamps,files,include_incomplete],sort_keys=True).encode()).hexdigest()
-    return {'files':files,'preserved':preserved,'bytes':sum(x['size'] for x in files),'fingerprint':fingerprint,'include_incomplete':include_incomplete}
+    return {'files':files,'preserved':preserved,'bytes':sum(x['size'] for x in files),'fingerprint':fingerprint,'include_incomplete':include_incomplete,'warnings':warnings}
 
 def quarantine(archive,state,review,include_incomplete=False):
     with LOCK:

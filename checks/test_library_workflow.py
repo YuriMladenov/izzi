@@ -811,6 +811,28 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertFalse((self.state/'cleanup_trash'/batch).exists())
         self.assertIn(unfinished.relative_to(self.state).as_posix(),{e['path'] for e in archive_cleanup.report(self.archive,self.state,True)['files']})
 
+    def test_cleanup_preserves_broken_diagnostics_but_blocks_broken_indexes(self):
+        import archive_cleanup,time
+        self.write('books.json',{});self.write('url_map.json',{})
+        blobs=self.archive/'blobs';blobs.mkdir()
+        orphan=blobs/(hashlib.sha256(b'orphan').hexdigest()+'.bin');orphan.write_bytes(b'orphan')
+        for name in ('capture_session.json','capture_observed.json'):
+            (self.state/name).write_text('',encoding='utf-8')
+        with patch.object(archive_cleanup,'now',return_value=time.time()+600):
+            result=archive_cleanup.report(self.archive,self.state)
+            self.assertEqual(2,len(result['warnings']));self.assertEqual(1,len(result['files']))
+            batch=archive_cleanup.quarantine(self.archive,self.state,result['fingerprint'])
+        for name in ('capture_session.json','capture_observed.json'):
+            self.assertEqual('',(self.state/name).read_text(encoding='utf-8'))
+        self.assertFalse(orphan.exists());archive_cleanup.restore(self.archive,self.state,batch);self.assertTrue(orphan.exists())
+        (self.state/'url_map.json').write_text('',encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'url_map.json'):archive_cleanup.report(self.archive,self.state)
+        self.write('url_map.json',{})
+        (self.state/'range_assembly').mkdir()
+        self.write('range_assembly/broken.json',{})
+        (self.state/'range_assembly/broken.json').write_text('',encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'broken.json'):archive_cleanup.report(self.archive,self.state)
+
     def test_cleanup_is_local_and_requires_review_and_valid_indexes(self):
         import archive_cleanup,operations,time
         clock=patch.object(archive_cleanup,'now',return_value=time.time()+600);clock.start();self.patches.append(clock)

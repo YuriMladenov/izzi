@@ -978,7 +978,7 @@ class H(BaseHTTPRequestHandler):
     def cleanup_page(self,p):
         import archive_cleanup
         query=parse_qs(p.query);include=query.get('incomplete')==['1']
-        content='<h1>Почистване на архива</h1><p>Първо прегледай отчета. Файловете се преместват в state/cleanup_trash за възстановяване. Място на диска се освобождава след отделно окончателно изтриване.</p><p><a href="/__videos__">Провери и довърши недовършените видеа</a>, преди да премахваш видео части.</p>'
+        content='<h1>Почистване на архива</h1><p>Първо прегледай отчета. Файловете се преместват в state/cleanup_trash за възстановяване. Място на диска се освобождава след отделно окончателно изтриване.</p><p>Не е нужно всички видеа да са изтеглени, за да почистиш архива. По подразбиране недовършените видео части се запазват. <a href="/__videos__">Преглед на видеата</a>.</p>'
         token='<input type="hidden" name="token" value="'+html.escape(operations.tasks.token,quote=True)+'">'
         try:
             if query.get('purge'):
@@ -987,6 +987,8 @@ class H(BaseHTTPRequestHandler):
             else:
                 result=archive_cleanup.report(ARCHIVE_DIR,STATE_DIR,include)
                 if query.get('format')==['json']:return self.sendb(json.dumps(result,ensure_ascii=False,indent=2).encode(),'application/json',extra={'Content-Disposition':'attachment; filename="cleanup-report.json"'})
+                for warning in result.get('warnings',[]):content+='<p class="auth-message">'+html.escape(warning)+'</p>'
+                if operations.capture_port_busy():content+='<p class="auth-message">Capture proxy работи. Можеш да прегледаш отчета, но преди потвърждение го спри от <a href="/__operations__">Capture и проверки</a> или от неговия прозорец. После генерирай нов отчет.</p>'
                 content+='<form class="cleanup-options" method="get"><label><input type="checkbox" name="incomplete" value="1" %s> Включи недовършените видео части (ще се загуби натрупаното изтегляне)</label><button>Генерирай отчет</button></form>'%('checked' if include else '')
                 content+='<h2>Предварителен отчет</h2><p>%d файла за преместване · %.1f MB. Запазени файлове и недовършени части: %d.</p><p><a href="?format=json%s">Изтегли пълния отчет</a></p>'%(len(result['files']),result['bytes']/1048576,len(result['preserved']),'&amp;incomplete=1' if include else '')
                 content+='<div class="table-wrap"><table><tr><th>Категория</th><th>Файл</th><th>Размер</th></tr>'+''.join('<tr><td>%s</td><td>%s/%s</td><td>%.1f KB</td></tr>'%(html.escape(e['category']),e['root'],html.escape(e['path']),e['size']/1024) for e in result['files'][:200])+'</table></div>'
