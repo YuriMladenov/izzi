@@ -13,6 +13,7 @@ document.getElementById('videos-state').textContent=labels[data.job.state]||data
 document.getElementById('videos-log').textContent=data.job.log||'Все още няма лог.';
 list.replaceChildren();
 for(const error of data.report.errors){const p=document.createElement('p');p.textContent=error;list.append(p);}
+for(const video of data.report.unavailable||[]){const section=document.createElement('section');section.className='task-panel';const title=document.createElement('h2');title.textContent='Недостъпно при източника · HTTP '+video.status;section.append(title);const label=document.createElement('p');label.textContent=video.label;section.append(label);const note=document.createElement('p');note.textContent='Няма данни за започнато изтегляне. Изключено е от „Довърши всички“. Отвори оригиналния урок през capture и провери действителния адрес.';section.append(note);const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Записани адреси ('+video.aliases.length+')';details.append(summary);for(const url of video.aliases){const p=document.createElement('p');p.textContent=url;details.append(p);}section.append(details);list.append(section);}
 if(!data.report.videos.length){const p=document.createElement('p');p.textContent='Няма открити недовършени IZZI MP4 видеа.';list.append(p);}
 for(const video of data.report.videos){
 const section=document.createElement('section');section.className='task-panel';

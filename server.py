@@ -10,6 +10,7 @@ from assembled_media import resolve as resolve_assembled
 import progress_journal
 import library_catalog
 import webui
+from resource_policy import optional_reason
 import book_covers
 import operations
 import archive_db
@@ -324,10 +325,11 @@ def current_missing(events,mapping):
         if key in seen:continue
         seen.add(key);ext=Path(path).suffix.lower()
         row=find(mapping,host,path,query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
-        if row or bundled_assets.asset(host,path) or geogebra_runtime.asset(host,path):resolved+=1;continue
+        local_ui=host==SOURCE_HOST and path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/videos.js','/__ui__/maintenance.js','/__ui__/izzi-logo.svg') and (webui.ASSETS/Path(path).name).is_file()
+        if row or local_ui or bundled_assets.asset(host,path) or geogebra_runtime.asset(host,path):resolved+=1;continue
         old=find(mapping,host,path,query)
-        category='UPSTREAM 404 WARNING' if old and old.get('status')==404 else (
-            'OPTIONAL' if ext=='.map' or path in ('/favicon.ico','/datastore/favicon.ico') else 'MISSING')
+        category='OPTIONAL' if optional_reason('https://'+host+path) else (
+            'UPSTREAM 404 WARNING' if old and old.get('status')==404 else 'MISSING')
         item=(category,host+path)
         if category=='MISSING':missing.append(item)
         else:warnings.append(item)
@@ -741,14 +743,14 @@ class H(BaseHTTPRequestHandler):
                 for label,url in items:
                     original=urlparse('https://'+url)
                     action=''
-                    if _izzi_host(original.hostname) and not original.username and not original.password:
+                    if label!='OPTIONAL' and _izzi_host(original.hostname) and not original.username and not original.password:
                         target='https://'+url+'?__izzi_offline_recover='+marker
                         action=' <a class="download" href="%s" target="_blank" rel="noopener noreferrer">Изтегли</a>'%html.escape(target,quote=True)
-                    rendered.append('<li data-search-item>%s <code>%s</code>%s</li>'%(label,html.escape(url),action))
+                    rendered.append('<li data-search-item>%s <code>%s</code>%s</li>'%(label,html.escape(url),action+(' <small>'+html.escape(optional_reason('https://'+url))+'</small>' if label=='OPTIONAL' else '')))
                 return ''.join(rendered)
             page='<!doctype html><meta charset="utf-8"><h1>Текущи липсващи ресурси (%d)</h1><p>Възстановени от историческия лог: %d. Логът е запазен.</p><ul>%s</ul><h2>Предупреждения (%d)</h2><ul>%s</ul>'%(len(missing),resolved,rows(missing),len(warnings),rows(warnings))
             page=page.replace('<h1>', '<style>.download{display:inline-block;padding:5px 10px;margin:4px;border:1px solid #567;border-radius:4px;text-decoration:none}li{margin:8px 0;overflow-wrap:anywhere}</style><p><a href="/">← Библиотека</a></p><p>„Изтегли“ отваря оригиналния ресурс в нов таб. За запис в архива използвай интернет и Firefox с включен capture proxy и Disable Cache. След зареждане се върни тук и презареди списъка. При достъп през LAN записването трябва да минава през capture proxy на компютъра с библиотеката. Origin 404 може да остане недостъпен.</p><h1>',1)
-            page+='<p><button id="download-all">Изтегли всички</button> <button id="download-stop" disabled>Спри</button></p><p id="download-status" role="status">Изтеглянето включва ресурсите от списъка и предупрежденията. Origin 404 може да остане недостъпен.</p>'
+            page+='<p><button id="download-all">Изтегли всички</button> <button id="download-stop" disabled>Спри</button></p><p id="download-status" role="status">Изтеглянето включва само ресурсите с бутон „Изтегли“. Незадължителните служебни адреси се пропускат. Origin 404 може да остане недостъпен.</p>'
             page+='<script>'+Path(__file__).with_name('missing_download.js').read_text(encoding='utf-8')+'</script>'
             page=re.sub(r'<style>.*?</style>','',page,flags=re.S).replace('<ul>','<ul class="resource-list">')
             return self.sendb(self.ui(page,'Липсващи ресурси','missing',search=bool(missing or warnings)).encode(),"text/html; charset=utf-8")

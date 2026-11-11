@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 from collections import deque
 from config import ARCHIVE_DIR,STATE_DIR,URL_MAP_FILE,CAPTURE_PROXY_PORT
 from import_har import load
-from replay_resolver import find,usable_body
+from replay_resolver import find,usable_body,_canon_path
 from range_assembler import RX,merged,uid,valid_part
 CHUNK=4*1024*1024
 MAX_VIDEO=250*1024*1024
@@ -41,12 +41,20 @@ def inspect():
             if path.stem!=uid(url) or not isinstance(data.get('total'),int) or data['total']<=0 or not isinstance(data.get('ranges'),list):raise ValueError('Невалиден manifest')
             manifests[url]=data;urls.add(url)
         except (OSError,ValueError,AttributeError) as error:errors.append(path.name+': '+str(error))
-    rows=[]
+    rows=[];unavailable={}
     for url in sorted(urls):
         p=urlsplit(url)
         full=find(mapping,p.hostname,p.path,p.query,lambda row:usable_body(row,ARCHIVE_DIR,'.mp4'))
         if full:continue
         identity=uid(url);data=manifests.get(url,{});total=data.get('total');ranges=[]
+        records=mapping.get(url,[])
+        # An error page named .mp4 is not evidence of an interrupted download.
+        if not data and records and all(r.get('status') in (404,410) for r in records):
+            canonical=_canon_path(p.path)
+            key=(canonical,p.query) if p.hostname in ('bg.izzi.digital','api.izzi.digital') and canonical.startswith('/datastore/blocks/') else (p.hostname,p.path,p.query)
+            item=unavailable.setdefault(key,{'label':p.hostname+canonical,'status':records[-1]['status'],'aliases':[]})
+            item['aliases'].append(url)
+            continue
         for record in mapping.get(url,[]):
             match=RX.fullmatch(str(record.get('content_range','')))
             if match and match[3]!='*' and not total:total=int(match[3])
@@ -65,7 +73,7 @@ def inspect():
             if 0<=start<=end<total and path.resolve().is_relative_to(ARCHIVE_DIR.resolve()) and valid_part(path,start,end):ranges.append([start,end])
         ranges=merged(ranges);covered=sum(end-start+1 for start,end in ranges)
         rows.append({'id':identity,'url':url,'label':p.hostname+p.path,'total':total,'covered':covered,'missing':gaps(ranges,total) if total else [],'percent':round(100*covered/total,1) if total else 0})
-    return {'videos':rows,'errors':errors}
+    return {'videos':rows,'unavailable':list(unavailable.values()),'errors':errors}
 
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,req,fp,code,msg,headers,newurl):
@@ -146,6 +154,7 @@ class Jobs:
                     else:raise ValueError('Лимитът за заявки е достигнат; повтори проверката.')
                 except urllib.error.HTTPError as error:
                     failed=True;message='HTTP '+str(error.code)
+                    if error.code in (404,410):message+=': ресурсът е недостъпен при източника; изтеглянето не може да продължи от този адрес. Провери действителния адрес в оригиналния урок.'
                     if error.code in (401,403):message+=': отвори видеото в оригиналния урок с правилния профил и активен capture, после опитай отново.'
                     self.note(message+' · '+selected['label'])
                     with self.lock:self.results.append({'id':selected['id'],'state':'failed','error':message})

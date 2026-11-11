@@ -85,7 +85,7 @@ class Resume(unittest.TestCase):
     def test_unknown_size_full_response_and_compressed_range_rejection(self):
         from import_har import load,save
         error_body=b'<html>missing</html>';key='missing.html';(self.archive/key).write_bytes(error_body)
-        mapping=load(self.state/'url_map.json',{});mapping[self.url]=[{'key':key,'status':404,'body_available':True,'size':len(error_body),'method':'GET','content_type':'text/html'}];save(self.state/'url_map.json',mapping)
+        mapping=load(self.state/'url_map.json',{});mapping[self.url]=[{'key':key,'status':502,'body_available':True,'size':len(error_body),'method':'GET','content_type':'text/html'}];save(self.state/'url_map.json',mapping)
         report=video_resume.inspect();self.assertIsNone(report['videos'][0]['total'])
         calls=[]
         def full(client,url,start,end):
@@ -96,6 +96,21 @@ class Resume(unittest.TestCase):
         self.assertEqual([(0,video_resume.CHUNK-1)],calls);self.assertEqual('success',jobs.snapshot()['state']);self.assertEqual([],video_resume.inspect()['videos'])
         flow=self.flow(0,19,resume=True);flow.metadata={'izzi_resume':True};flow.response.headers['Content-Encoding']='gzip'
         capture_addon.response(flow);self.assertEqual(502,flow.response.status_code)
+
+    def test_404_only_mp4s_are_unavailable_not_resume_candidates(self):
+        urls=['https://api.izzi.digital/datastore/blocks/8151871/info/video.mp4','https://bg.izzi.digital/DOS/412693/datastore/blocks/8151871/info/video.mp4']
+        for url in urls:
+            flow=self.flow(0,19,url=url);flow.response=http.Response.make(404,b'<html>Not found</html>',{'Content-Type':'text/html'})
+            capture_addon.response(flow)
+        report=video_resume.inspect()
+        self.assertEqual([],report['videos']);self.assertEqual(1,len(report['unavailable']))
+        self.assertEqual(set(urls),set(report['unavailable'][0]['aliases']))
+        jobs=video_resume.Jobs()
+        with patch.object(operations,'capture_port_busy',return_value=True):
+            with self.assertRaisesRegex(ValueError,'Няма недовършени'):jobs.start()
+        self.partial(0,19)
+        flow=self.flow(0,19);flow.response=http.Response.make(404,b'Gone',{'Content-Type':'text/html'});capture_addon.response(flow)
+        self.assertEqual(1,len(video_resume.inspect()['videos']))
 
     def test_video_page_and_actions_require_local_control(self):
         self.partial(0,19);self.start_server()

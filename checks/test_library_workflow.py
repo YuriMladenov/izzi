@@ -468,6 +468,22 @@ class LibraryWorkflow(unittest.TestCase):
         self.start_server()
         self.assertEqual(503,self.request('/DOS/1/0.html')[0])
         self.assertFalse((self.state/'missing_resources.jsonl').exists())
+    def test_missing_service_resources_use_shared_optional_policy_before_404(self):
+        paths=['/DOS/888827/profil/dist/common/analytics/xapi/xapiwrapper.min.js.map','/DOS/3868/datastore/','/__ui__/maintenance.js','/datastore/blocks/1299375/linear/index.html']
+        for path in paths:self.add(path,b'<html>404</html>',status=404,content_type='text/html')
+        events=[{'host':'bg.izzi.digital','path':p} for p in paths]
+        events.append({'host':'cdn.consent.hr','path':'/delivery/autoblocking/ab4a291ea1687.js'})
+        missing,warnings,resolved=server.current_missing(events,self.mapping)
+        self.assertEqual([],missing);self.assertEqual(1,resolved)
+        self.assertEqual(3,sum(label=='OPTIONAL' for label,_ in warnings))
+        self.assertIn(('UPSTREAM 404 WARNING','bg.izzi.digital'+paths[-1]),warnings)
+        self.assertFalse(server.optional_reason('https://bg.izzi.digital/_nuxt/lang-hr.0de6021eabc8d0b5d682.js'))
+        self.assertFalse(server.optional_reason('https://api.izzi.digital/datastore/blocks/8149759/_cp_n_m_'))
+        self.start_server()
+        (self.state/'missing_resources.jsonl').write_text(''.join(json.dumps(e)+'\n' for e in events),encoding='utf-8')
+        status,_,body=self.request('/__missing__');self.assertEqual(200,status)
+        self.assertEqual(1,body.decode().count('>Изтегли</a>'))
+
     def test_current_missing_excludes_recovered_and_separates_warnings(self):
         self.add('/DOS/1/restored.png',b'\x89PNGfixture',content_type='image/png')
         self.add('/DOS/1/upstream.png',b'<html>404</html>',status=404,content_type='text/html')
@@ -482,7 +498,7 @@ class LibraryWorkflow(unittest.TestCase):
         self.assertNotIn('restored.png',text);self.assertIn('UPSTREAM 404 WARNING',text)
         self.assertEqual(5,len((self.state/'missing_resources.jsonl').read_text(encoding='utf-8').splitlines()))
         self.assertIn('https://bg.izzi.digital/DOS/1/missing.png?__izzi_offline_recover=',text)
-        self.assertEqual(4,text.count('>Изтегли</a>'))
+        self.assertEqual(2,text.count('>Изтегли</a>'))
         self.assertIn('rel="noopener noreferrer"',text)
     def test_attachment_replay_preserves_bytes_and_forces_download(self):
         bodies={'exe':b'MZbinary\x00file','sb3':b'PK\x03\x04scratch-fixture'}
