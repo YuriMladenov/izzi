@@ -883,6 +883,15 @@ class LibraryWorkflow(unittest.TestCase):
         page=self.request('/')[2].decode()
         self.assertIn('lang="bg"',page);self.assertIn('Библиотеката е празна',page)
         self.assertIn('/__ui__/app.css',page);self.assertIn('/__ui__/app.js',page)
+        self.assertIn('class="library-home-link" href="/"',page)
+        self.assertEqual(1,page.count('href="/__maintenance__"'))
+        self.assertNotIn('href="/__maintenance__#startup"',page)
+        for group in ('Запис и възстановяване','Отчети','Система'):
+            self.assertIn(group,page)
+        reader=server.webui.page('<h1>Book</h1>',readonly=True)
+        self.assertIn('class="library-home-link" href="/"',reader)
+        self.assertNotIn('/__operations__',reader)
+
         for path,mime in [('/__ui__/app.css','text/css'),('/__ui__/app.js','application/javascript'),('/__ui__/operations.js','application/javascript')]:
             code,headers,body=self.request(path)
             self.assertEqual(code,200);self.assertTrue(headers['Content-Type'].startswith(mime));self.assertTrue(body)

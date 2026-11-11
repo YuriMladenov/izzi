@@ -4,15 +4,25 @@ from pathlib import Path
 ASSETS=Path(__file__).with_name('webui')
 def page(content,title='Библиотека',active='library',search=False,catalog=False,readonly=False,admin_session=False):
     content=re.sub(r'<!doctype[^>]*>|<meta[^>]*>|<link[^>]*>|<title>.*?</title>','',content,flags=re.I|re.S)
-    links=[('library','/','Библиотека','▤'),('missing','/__missing__','Липсващи ресурси','↧'),('videos','/__videos__','Недовършени видеа','▶'),('journal','/__journal__','Локален журнал','◷'),('cleanup','/__cleanup__','Почистване на архива','⌫'),('operations','/__operations__','Capture и проверки','▷'),('help','/__help__','Как да използвам','?')]
-    links.append(('admin','/__admin__/account','Администратор','⚙'))
-    links.append(('capture-report','/__capture_report__','Отчет за интерактивностите','✓'))
-    links.append(('maintenance','/__maintenance__#update','Обновяване от GitHub','↻'))
-    links.append(('startup','/__maintenance__#startup','Стартиране с Windows','▷'))
-    if admin_session:links.append(('logout','/__admin__/logout','Изход','↪'))
-    nav=''.join('<a href="%s" %s><span aria-hidden="true">%s</span>%s</a>'%(url,'aria-current="page"' if key==active else '',icon,label) for key,url,label,icon in links)
+    groups=[('Запис и възстановяване',[
+        ('operations','/__operations__','Capture и проверки','▷'),
+        ('missing','/__missing__','Липсващи ресурси','↧'),
+        ('videos','/__videos__','Недовършени видеа','▶')]),
+        ('Отчети',[
+        ('capture-report','/__capture_report__','Отчет за интерактивностите','✓'),
+        ('journal','/__journal__','Локален журнал','◷')]),
+        ('Система',[
+        ('cleanup','/__cleanup__','Почистване на архива','⌫'),
+        ('maintenance','/__maintenance__','Поддръжка','↻'),
+        ('admin','/__admin__/account','Администратор','⚙')]),
+        ('Помощ',[('help','/__help__','Как да използвам','?')])]
+    if admin_session:groups[-1][1].append(('logout','/__admin__/logout','Изход','↪'))
+    nav=''
+    for index,(label,links) in enumerate(groups):
+        entries=''.join('<a href="%s" %s><span aria-hidden="true">%s</span>%s</a>'%(url,'aria-current="page"' if key==active else '',icon,text) for key,url,text,icon in links)
+        nav+='<section class="menu-group" aria-labelledby="menu-group-%d"><h2 id="menu-group-%d">%s</h2>%s</section>'%(index,index,label,entries)
     searchbox='<div class="searchbar"><label for="ui-search">Търсене в списъка</label><input id="ui-search" type="search" placeholder="Въведи име, ID или адрес…" autocomplete="off"><span id="ui-count" role="status"></span></div><p id="ui-no-results" hidden>Няма съвпадения. Опитай с друго име или ID.</p>' if search else ''
-    menu='<details class="library-menu"><summary>☰ <span>Меню</span></summary><nav aria-label="Основна навигация">'+nav+'</nav></details>'
+    menu='<details class="library-menu"><summary>☰ <span>Управление</span></summary><nav aria-label="Основна навигация">'+nav+'</nav></details>'
     if readonly:menu='<a class="admin-login-link" href="/__admin__/login">Администраторски вход</a>'
     if catalog:
         heading='<h1>Библиотека</h1>'
@@ -22,7 +32,7 @@ def page(content,title='Библиотека',active='library',search=False,cata
         if match:
             heading=match.group(0);content=content[:match.start()]+content[match.end():]
         else:heading='<h1>'+html.escape(title)+'</h1>'
-    return ('<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>'+html.escape(title)+' · IZZI Library</title><link rel="stylesheet" href="/__ui__/app.css"><script src="/__ui__/app.js" defer></script></head><body class="catalog-home"><header class="catalog-header"><a class="catalog-logo" href="/" aria-label="IZZI — Библиотека"><img src="/__ui__/izzi-logo.svg" alt="IZZI" width="116" height="42"></a>'+menu+'</header><main id="main-content"><div class="content">'+heading+searchbox+content+'</div></main></body></html>')
+    return ('<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>'+html.escape(title)+' · IZZI Library</title><link rel="stylesheet" href="/__ui__/app.css"><script src="/__ui__/app.js" defer></script></head><body class="catalog-home"><header class="catalog-header"><a class="catalog-logo" href="/" aria-label="IZZI — Библиотека"><img src="/__ui__/izzi-logo.svg" alt="IZZI" width="116" height="42"></a><a class="library-home-link" href="/">← Библиотека</a>'+menu+'</header><main id="main-content"><div class="content">'+heading+searchbox+content+'</div></main></body></html>')
 
 
 def book_card(book_id,title,cover='',decoration='',palette='',publisher=''):
