@@ -21,7 +21,7 @@ RUN --mount=type=secret,id=proxy_ca \
     python -m pip install --no-cache-dir -r /tmp/requirements-capture.txt 'yt-dlp[default]' \
     && python -m pip check
 COPY . /app
-ARG IZZI_BRANCH=WebUI
+ARG IZZI_BRANCH=main
 # Associate the copied source with its upstream commit; fail on mismatched source.
 RUN --mount=type=secret,id=proxy_ca \
     set -eu; git init -b "$IZZI_BRANCH" \
