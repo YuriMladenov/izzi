@@ -1,5 +1,24 @@
 # IZZI Offline Library
 
+## Бързо стартиране с Docker / CasaOS
+
+Готов образ: [yurimladenov/izzi-library в Docker Hub](https://hub.docker.com/r/yurimladenov/izzi-library).
+Публикуваният `new` образ е за **linux/amd64** (Intel/AMD 64-bit); ARM вариант не е потвърден.
+
+```bash
+docker pull yurimladenov/izzi-library:new
+```
+
+За **нова инсталация** импортирайте [docker/casaos.yaml](docker/casaos.yaml) в CasaOS или изпълнете `sudo bash docker/install_casaos.sh` от проекта. Не е нужен локален build. Скриптът използва `/DATA/AppData/izzi`; за съществуваща инсталация използвайте нейния Compose файл и папки.
+
+`new` е променлив tag. За възпроизводима инсталация може да фиксирате проверения digest в `image:`:
+
+```yaml
+image: yurimladenov/izzi-library@sha256:443ef8897868d226db1806fe2c1ded9f8f5e168009f7bf364cda2f09083456e9
+```
+
+`docker pull` само изтегля образа. За обновяване на контейнера са нужни pull и пресъздаване със същите volumes. Съществуващият checkout `/opt/izzi/project` се запазва и кодът в него се обновява отделно от администраторското меню. Вижте [подробните инструкции за CasaOS](#casaos-самостоятелен-docker-контейнер).
+
 ### Обновяване от менюто и автоматичен старт с Windows
 
 Администраторското меню има „Обновяване от GitHub“ и „Стартиране с Windows“. Под Windows и Docker обновяването използва текущия клон `main` или `WebUI` от `https://github.com/YuriMladenov/izzi.git`. Спри capture, проверките и изтеглянето на видеа, след което натисни „Провери и обнови от GitHub“. Проверката работи във фонов режим и показва резултата и лог. Локални промени, непознат remote, разделени клонове, невалиден Python код или промени на зависимости спират обновяването. Използва се само fast-forward; няма reset/clean и архивните папки не се презаписват. Промени на requirements или Dockerfile изискват ръчна поддръжка/нов образ; менюто е за обновяване на приложния код в наличната среда.
@@ -8,7 +27,7 @@
 
 **Windows преди вход:** отвори „Стартиране с Windows“ локално през `http://127.0.0.1:8765/` и натисни „Създай / обнови Windows задача“. Потвърди UAC на компютъра, където работи библиотеката. Отваря се видим PowerShell прозорец, който остава отворен; въведи реалната Windows парола, а не Windows Hello PIN. Страницата показва изчакване още при натискане на бутона и после прочита резултата от настройването. При отказан UAC или изтекло време изчакването се заменя с грешка. След приключване можеш да затвориш PowerShell прозореца. Ако не го виждаш, провери лентата със задачи и работи локално на Windows сървъра. Задачата се създава под потребителя, който изпълнява библиотеката, с trigger при зареждане на Windows и 30 секунди отлагане. Стартира само библиотеката без браузър и без интерактивни BAT прозорци; работи преди входа и няма ограничение от три дни. Паролата се предава само на Task Scheduler и не се пази в проекта или HTTP заявка. При отказ, неправилна парола или недостатъчни права резултатът се показва в страницата; тя показва последния резултат от настройването, а не постоянно наблюдение на Scheduler. При смяна на Windows паролата създай задачата отново. Изтриването/спирането е през Task Scheduler под името `IZZI Library <идентификатор на папката>`. Различните инсталации получават различни имена. Нужни са работещи Python, локални файлови пътища и достъпът на този потребител до архива.
 
-**Docker/CasaOS:** за вече инсталиран стар контейнер е нужен един начален rebuild с новия Dockerfile и новото volume `/DATA/AppData/izzi/code:/opt/izzi`. Изграждай от чист, синхронизиран с GitHub checkout на `main`; това е подразбиращият се `IZZI_BRANCH`. Образът проверява, че копираният код съответства на избрания GitHub commit. При първи старт се инициализира постоянният checkout в `/opt/izzi/project`; следващите стартирания го запазват. Кодът се обновява от менюто без rebuild, ако зависимостите не са променени. Данните остават на съществуващите mounts `/app/archive`, `/app/state`, `/app/captures` и `/app/vendor/geogebra`; не ги премествай в папката за код. Docker socket и права върху Docker host не са необходими. Ако контейнерът е създаден без code volume, обновяването не е гарантирано при пресъздаване на контейнера.
+**Docker/CasaOS:** за вече инсталиран стар контейнер е нужно първоначално пресъздаване с актуалния готов образ (или собствен rebuild) и новото volume `/DATA/AppData/izzi/code:/opt/izzi`. Изграждай от чист, синхронизиран с GitHub checkout на `main`; това е подразбиращият се `IZZI_BRANCH`. Образът проверява, че копираният код съответства на избрания GitHub commit. При първи старт се инициализира постоянният checkout в `/opt/izzi/project`; следващите стартирания го запазват. Кодът се обновява от менюто без rebuild, ако зависимостите не са променени. Данните остават на съществуващите mounts `/app/archive`, `/app/state`, `/app/captures` и `/app/vendor/geogebra`; не ги премествай в папката за код. Docker socket и права върху Docker host не са необходими. Ако контейнерът е създаден без code volume, обновяването не е гарантирано при пресъздаване на контейнера.
 
 ### Производителност при повторно зареждане
 
@@ -637,7 +656,7 @@ GeoGebra download домейнът е блокиран в използванат
 
 ## CasaOS: самостоятелен Docker контейнер
 
-`docker/Dockerfile` създава Debian Bookworm образ с Python 3.12, mitmproxy, FFmpeg, Node.js 22 и yt-dlp с EJS. Инструментите са в образа; не се копира `.venv` от стар контейнер. `.dockerignore` изключва archive/state/captures, Git и локалните среди от build контекста. Образът се сглобява на CasaOS хоста, а `docker/casaos.yaml` се импортира в CasaOS. Не е публикуван предварително сглобен образ в registry.
+`docker/Dockerfile` създава Debian Bookworm образ с Python 3.12, mitmproxy, FFmpeg, Node.js 22 и yt-dlp с EJS. Инструментите са в образа; не се копира `.venv` от стар контейнер. `.dockerignore` изключва archive/state/captures, Git и локалните среди от build контекста. Готовият образ `yurimladenov/izzi-library:new` се изтегля от Docker Hub, а `docker/casaos.yaml` се импортира в CasaOS. Локален build е алтернатива за разработка.
 
 Всички команди по-долу се изпълняват на **CasaOS хоста**, през SSH или неговия терминал, а не в Debian контейнера. Първо запазете стария контейнер и архива. Новата конфигурация използва отделна `/DATA/AppData/izzi` и не премества автоматично старите файлове.
 
@@ -645,13 +664,13 @@ GeoGebra download домейнът е блокиран в използванат
 
 ```bash
 cd /DATA/AppData/izzi/source
-sudo docker build -f docker/Dockerfile -t izzi-library:local .
+sudo docker compose -f docker/casaos.yaml pull
 sudo mkdir -p /DATA/AppData/izzi/{archive,state,captures,mitmproxy,geogebra}
 ```
 
-`docker/install_casaos.sh` автоматизира проверката на Docker/Compose, създаването на папките, build и стартирането: изпълнете `sudo bash docker/install_casaos.sh` от разархивирания проект. При този вариант не импортирайте втори път същото приложение. Скриптът не спира и не изтрива стари контейнери, не инсталира самия Docker и не променя стар архив.
+`docker/install_casaos.sh` автоматизира проверката на Docker/Compose, създаването на папките, изтеглянето на образа и стартирането: изпълнете `sudo bash docker/install_casaos.sh` от разархивирания проект. При този вариант не импортирайте втори път същото приложение. Скриптът не спира и не изтрива стари контейнери, не инсталира самия Docker и не променя стар архив.
 
-Спрете стария контейнер, който заема портове 8765/8877; не го изтривайте. В CasaOS изберете **Apps → + → Custom Install APP → Import** и импортирайте `docker/casaos.yaml`. Проверете, че image е `izzi-library:local` и портовете са 8765 и 8877 TCP. Образът трябва вече да е сглобен на същия Docker хост. Не добавяйте `sleep`, отделна команда или виртуална Python среда. Образът има правилни WORKDIR и CMD. Restart policy е `unless-stopped`, лимитът на RAM е 2 GiB. Нужни са достатъчно свободни RAM и дисково пространство за build, архив и видео обработка.
+Спрете стария контейнер, който заема портове 8765/8877; не го изтривайте. В CasaOS изберете **Apps → + → Custom Install APP → Import** и импортирайте `docker/casaos.yaml`. Проверете, че image е `yurimladenov/izzi-library:new` и портовете са 8765 и 8877 TCP. Нужен е достъп до Docker Hub за изтегляне на образа. Не добавяйте `sleep`, отделна команда или виртуална Python среда. Образът има правилни WORKDIR и CMD. Restart policy е `unless-stopped`, лимитът на RAM е 2 GiB. Нужни са достатъчно свободни RAM и дисково пространство за build, архив и видео обработка.
 
 Алтернатива без импорт от интерфейса, ако Docker Compose е инсталиран:
 
@@ -667,6 +686,7 @@ sudo docker compose -f docker/casaos.yaml logs --tail=100
 
 | CasaOS хост | Контейнер | Съдържание |
 | --- | --- | --- |
+| `/DATA/AppData/izzi/code` | `/opt/izzi` | Постоянен Git checkout на приложението |
 | `/DATA/AppData/izzi/archive` | `/app/archive` | Изтеглени тела, видео, YouTube |
 | `/DATA/AppData/izzi/state` | `/app/state` | SQLite индекси, каталог, журнал и администраторски профил |
 | `/DATA/AppData/izzi/captures` | `/app/captures` | HAR файлове за импорт |
@@ -679,14 +699,12 @@ Capture се стартира от **Меню → Capture и проверки**.
 
 GeoGebra двигателят се инсталира допълнително с `docker compose -f docker/casaos.yaml exec izzi python install_geogebra.py`; лицензът и условията остават тези на GeoGebra. Готовата инсталация се пази в постоянната папка.
 
-За обновяване първо спрете capture и запазете backup на постоянните данни. Обновете source до новия main commit, сглобете пак същия image и пресъздайте контейнера. Не използвайте „pull latest“ за локално сглобения образ:
+За обновяване първо спрете capture и запазете backup на постоянните данни. Ако старата конфигурация използва локален образ, сменете само `image:` на `yurimladenov/izzi-library:new`, без да променяте volumes и името на Compose проекта. Изтеглете новия образ и пресъздайте контейнера:
 
 ```bash
 cd /DATA/AppData/izzi/source
-sudo docker compose -f docker/casaos.yaml stop
-git pull --ff-only origin main   # само ако source е Git checkout
-sudo docker build -f docker/Dockerfile -t izzi-library:local .
-sudo docker compose -f docker/casaos.yaml up -d --force-recreate
+sudo docker compose -f docker/casaos.yaml pull
+sudo docker compose -f docker/casaos.yaml up -d --no-build --force-recreate
 ```
 
 При управление от CasaOS използвайте същото име на Compose проекта `izzi`, за да не създадете втори контейнер. Не премахвайте постоянните папки при обновяване. STOPSIGNAL SIGINT позволява на server.py да прекрати собствените capture и download задачи преди спиране. Healthcheck проверява реален локален HTTP отговор без интернет и без сканиране на целия каталог. Нормален рестарт на Docker/хоста стартира библиотеката автоматично; ръчно спрян контейнер с unless-stopped остава спрян до следващо изрично стартиране.
@@ -800,3 +818,6 @@ JS/CSS с NUL байтове не се приемат за годни, вклю�
 
 
 Rebuild не превключва вече съществуващия постоянен checkout `/opt/izzi/project`: той се запазва при пресъздаване. При стара инсталация на `WebUI` първо преминете към `main` с `git fetch origin` и `git switch main` (или `git switch -c main --track origin/main`, ако локален main липсва), след което `git pull --ff-only origin main`. При локални промени или разминаваща се история спрете за проверка, без reset/clean. Запазете съществуващите CasaOS mounts и името на образа; примерният Compose използва различни пътища от персонализирани инсталации.
+
+
+За локално изграждане от чист main checkout вместо готовия образ: `docker build -f docker/Dockerfile -t izzi-library:local .`. В отделно копие на Compose файла задайте `image: izzi-library:local` и използвайте `up -d --no-build --pull never`; не изпълнявайте pull за този локален tag.

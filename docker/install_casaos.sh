@@ -11,7 +11,7 @@ docker info >/dev/null
 docker compose version
 docker compose -f docker/casaos.yaml config --quiet
 mkdir -p /DATA/AppData/izzi/{archive,state,captures,mitmproxy,geogebra,code}
-docker build -f docker/Dockerfile -t izzi-library:local .
+docker compose -f docker/casaos.yaml pull
 docker compose -f docker/casaos.yaml up -d
 docker compose -f docker/casaos.yaml ps
 echo 'Open http://<CasaOS IP>:8765/ ; initial administrator: admin / izzi'

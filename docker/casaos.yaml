@@ -1,7 +1,7 @@
 name: izzi
 services:
   izzi:
-    image: izzi-library:local
+    image: yurimladenov/izzi-library:new
     restart: unless-stopped
     init: true
     stop_grace_period: 45s
