@@ -268,6 +268,32 @@ class LibraryWorkflow(unittest.TestCase):
         self.write('capture_session.json',session)
         self.assertEqual(self.report()['done'],['0'])
 
+    def test_unreadable_capture_session_does_not_block_book_or_change_preferences(self):
+        self.write('books.json',{'1':{'title':'Book','lessons':{'2':{'title':'Two','path':'/DOS/1/2.html'}}}})
+        preferences={'1':{'names':{'2':'My lesson'}}}
+        self.write('library_catalog.json',preferences)
+        self.start_server()
+        for raw in ('{', 'null', '{"visits":null}', '{"visits":[null]}'):
+            (self.state/'capture_session.json').write_text(raw,encoding='utf-8')
+            status,_,body=self.request('/__book__/1')
+            self.assertEqual(200,status);self.assertIn(b'My lesson',body)
+            self.assertEqual(raw,(self.state/'capture_session.json').read_text(encoding='utf-8'))
+            self.assertEqual(preferences,json.loads((self.state/'library_catalog.json').read_text(encoding='utf-8')))
+        (self.state/'library_catalog.json').write_text('{',encoding='utf-8')
+        status,_,body=self.request('/__book__/1')
+        self.assertEqual(503,status);self.assertIn(b'library_catalog.json',body)
+
+    def test_capture_session_writes_atomically_and_keeps_concurrent_events(self):
+        import capture_session
+        path=self.state/'capture_session.json'
+        from import_har import save as atomic_save
+        with patch.object(capture_session,'P',path),patch.object(capture_session,'atomic_save',wraps=atomic_save) as save:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                list(pool.map(lambda i:capture_session.event('lesson-start','1',str(i)),range(12)))
+            self.assertEqual(12,save.call_count)
+        visits=json.loads(path.read_text(encoding='utf-8'))['visits']
+        self.assertEqual({str(i) for i in range(12)},{v['lesson'] for v in visits})
+
     def test_catalogue_order_rename_hide_and_persistence(self):
         books={'1':{'title':'Book','lessons':{'9':{'id':'9','title':'Nine','path':'/DOS/1/9.html'},'2':{'id':'2','title':'Two','path':'/DOS/1/2.html'},'5':{'id':'5','title':'Five','path':'/DOS/1/5.html'}}}}
         self.write('books.json',books)

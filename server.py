@@ -637,10 +637,23 @@ class H(BaseHTTPRequestHandler):
             if not b:return self.sendb(b"Unknown book","text/plain",404)
             try:
                 preferences=load_archive_state(STATE_DIR/'library_catalog.json',{})
+                if not isinstance(preferences,dict):raise ValueError('Invalid library_catalog root')
+            except (OSError,ValueError,TypeError,AttributeError) as error:
+                print('[LIBRARY SETTINGS ERROR] library_catalog.json',type(error).__name__)
+                return self.sendb(b'Library settings unavailable: library_catalog.json. File preserved; inspect server log.','text/plain',503)
+            session_warning=''
+            try:
                 session=load_archive_state(STATE_DIR/'capture_session.json',{'visits':[]})
+                if not isinstance(session,dict) or not isinstance(session.get('visits',[]),list) or any(not isinstance(v,dict) for v in session.get('visits',[])):raise ValueError('Invalid capture visits')
+            except (OSError,ValueError,TypeError,AttributeError) as error:
+                print('[LIBRARY SESSION WARNING] capture_session.json',type(error).__name__)
+                session={'visits':[]}
+                if not readonly:session_warning='<p>Диагностичният capture журнал е недостъпен. Показани са архивният каталог и ръчните настройки; журналът е запазен.</p>'
+            try:
                 ls=library_catalog.ordered_lessons(bid,b,session,preferences)
-            except (OSError,ValueError,TypeError,AttributeError):
-                return self.sendb(b'Library settings unavailable','text/plain',503)
+            except (OSError,ValueError,TypeError,AttributeError) as error:
+                print('[LIBRARY SETTINGS ERROR] lesson presentation',type(error).__name__)
+                return self.sendb(b'Library settings unavailable: invalid lesson presentation metadata. Inspect server log.','text/plain',503)
             if parse_qs(p.query).get('edit')==['1']:
                 automatic=parse_qs(p.query).get('auto')==['1']
                 if automatic:
@@ -671,6 +684,7 @@ class H(BaseHTTPRequestHandler):
             known,available=page_counts(m,bid,b)
             edit_link='' if readonly else ' · <a class="download" href="?edit=1">Подреди / преименувай / скрий</a> · <a class="download" href="/__delete_book__/'+html.escape(bid)+'">Изтрий учебника</a>'
             content='<h1>%s</h1><p>ID %s · %d известни страници · %d с наличен HTML</p><p><a href="/">← Библиотека</a>%s</p>%s'%(html.escape(b["title"]),html.escape(bid),known,available,edit_link,items)
+            content+=session_warning
             if not items:content+='<p class="empty">Няма показани уроци. Провери скритите страници в редактора.</p>'
             return self.sendb(self.ui(content,'Уроци',search=bool(items),readonly=readonly).encode(),"text/html; charset=utf-8")
         if p.path=="/__offline__/gtag.js":
