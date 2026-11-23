@@ -64,7 +64,7 @@ def remove(book,state,archive):
         log=state/'missing_resources.jsonl'
         if log.exists():
             lines=[]
-            for line in log.read_text(encoding='utf8').splitlines():
+            for line in log.read_text(encoding='utf-8-sig').splitlines():
                 try:row=json.loads(line)
                 except ValueError:lines.append(line);continue
                 url='https://'+row.get('host','')+row.get('path','')

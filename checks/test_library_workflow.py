@@ -278,7 +278,7 @@ class LibraryWorkflow(unittest.TestCase):
             status,_,body=self.request('/__book__/1')
             self.assertEqual(200,status);self.assertIn(b'My lesson',body)
             self.assertEqual(raw,(self.state/'capture_session.json').read_text(encoding='utf-8'))
-            self.assertEqual(preferences,json.loads((self.state/'library_catalog.json').read_text(encoding='utf-8')))
+            self.assertEqual(preferences,json.loads((self.state/'library_catalog.json').read_text(encoding='utf-8-sig')))
         (self.state/'library_catalog.json').write_text('{',encoding='utf-8')
         status,_,body=self.request('/__book__/1')
         self.assertEqual(503,status);self.assertIn(b'library_catalog.json',body)

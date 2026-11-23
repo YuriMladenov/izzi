@@ -40,7 +40,7 @@ def load(path,default):
         except FileNotFoundError:CACHE.pop(path,None);return default
         if path in CACHE and CACHE[path][0]==stamp:return CACHE[path][1]
         for _ in range(3):
-            with path.open(encoding='utf8') as stream:value=json.load(stream)
+            with path.open(encoding='utf-8-sig') as stream:value=json.load(stream)
             after=signature(path)
             if after==stamp:
                 if path.name=='url_map.json' and isinstance(value,dict):value=ReplayMap(value)

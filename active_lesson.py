@@ -16,7 +16,7 @@ def clear():
 
 def get_active(max_age=45):
     try:
-        x=json.loads(P.read_text(encoding="utf-8"))
+        x=json.loads(P.read_text(encoding="utf-8-sig"))
         if time.time()-float(x.get("time",0))>max_age:
             return None
         if x.get("book") and x.get("lesson"):

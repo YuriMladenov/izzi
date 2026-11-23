@@ -48,7 +48,7 @@ def replay_mime(url, recorded=""):
     return MIME_OVERRIDES.get(ext) or recorded or "application/octet-stream"
 
 def load(p,d):
-    try:return json.loads(Path(p).read_text(encoding="utf-8"))
+    try:return json.loads(Path(p).read_text(encoding="utf-8-sig"))
     except:return d
 
 from replay_resolver import (score,pick,logical_path,_izzi_host,_canon_path,find,book_ids,compatible_books,usable_body,complete_body)

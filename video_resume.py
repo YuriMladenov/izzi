@@ -36,7 +36,7 @@ def inspect():
     manifests={};errors=[]
     for path in sorted((STATE_DIR/'range_assembly').glob('*.json')):
         try:
-            data=json.loads(path.read_text(encoding='utf8'));url=data.get('url','')
+            data=json.loads(path.read_text(encoding='utf-8-sig'));url=data.get('url','')
             if not safe_url(url):continue
             if path.stem!=uid(url) or not isinstance(data.get('total'),int) or data['total']<=0 or not isinstance(data.get('ranges'),list):raise ValueError('Невалиден manifest')
             manifests[url]=data;urls.add(url)

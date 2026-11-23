@@ -76,7 +76,7 @@ def initialize(state):
                 c.commit();return db
             data={}
             for name in NAMES:
-                p=state/name;data[name]=json.loads(p.read_text(encoding='utf8')) if p.exists() else {}
+                p=state/name;data[name]=json.loads(p.read_text(encoding='utf-8-sig')) if p.exists() else {}
                 if not isinstance(data[name],dict):raise ValueError('Invalid index: '+name)
             for url,rows in data['url_map.json'].items():
                 if not isinstance(rows,list) or any(not isinstance(r,dict) for r in rows):raise ValueError('Invalid resource record array')

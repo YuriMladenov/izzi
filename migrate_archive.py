@@ -39,7 +39,7 @@ def report(archive,state):
             files.append({'old':old,'new':new,'size':path.stat().st_size,'exists':target.exists()})
             stamps.append([old,stamp(path),stamp(target) if target.exists() else None])
     for path in auxiliary(state):
-        json.loads(path.read_text(encoding='utf8'));stamps.append([path.relative_to(state).as_posix(),stamp(path)])
+        json.loads(path.read_text(encoding='utf-8-sig'));stamps.append([path.relative_to(state).as_posix(),stamp(path)])
     revision=archive_db.revision(state/archive_db.DB_NAME)
     return {'files':files,'count':len(files),'copy_bytes':sum(r['size'] for r in files if not r['exists']),
             'missing':missing,'revision':revision,'fingerprint':hashlib.sha256(json.dumps([revision,stamps],sort_keys=True).encode()).hexdigest()}
@@ -87,7 +87,7 @@ def apply(archive,state,review):
         if new!=value:books[key]=new
     save(state/'books.json',books)
     for path in aux:
-        value=json.loads(path.read_text(encoding='utf8'));new=rewrite(value,keys)
+        value=json.loads(path.read_text(encoding='utf-8-sig'));new=rewrite(value,keys)
         if new!=value:save(path,new)
     return {'moved':len(keys),'backup':str(backup)}
 

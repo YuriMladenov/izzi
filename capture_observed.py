@@ -16,7 +16,7 @@ def signature():
     except FileNotFoundError:return str(P.resolve()),None
 
 def load():
-    try:return json.loads(P.read_text(encoding="utf-8"))
+    try:return json.loads(P.read_text(encoding="utf-8-sig"))
     except:return {"requests":{}}
 
 def save(x):

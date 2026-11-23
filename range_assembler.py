@@ -37,7 +37,7 @@ def add_range(url,content_range,data,validator=None):
     part=work/f"{start}-{end}.part"
     if not part.exists() or part.stat().st_size!=len(data) or part.read_bytes()!=data:part.write_bytes(data)
     mf=manifest_path(url)
-    try: man=json.loads(mf.read_text(encoding="utf-8"))
+    try: man=json.loads(mf.read_text(encoding="utf-8-sig"))
     except: man={"url":url,"total":total,"ranges":[]}
     if man.get("total")!=total or (validator and man.get("validator") and validator!=man["validator"]):
         man={"url":url,"total":total,"ranges":[]}

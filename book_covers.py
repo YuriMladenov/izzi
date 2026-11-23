@@ -35,7 +35,7 @@ def catalog_covers(mapping,archive,books):
     result={str(bid):{'src':'','decoration':'','palette':'','grade':grade_number(book.get('title','')),'publisher':publisher_name(book)} for bid,book in books.items()}
     record=find(mapping,SOURCE,'/api/online-bookshelf-publications','',lambda row:usable_body(row,archive,'.json'))
     if not record:return result
-    try:payload=json.loads((archive/record['key']).read_text(encoding='utf8'))
+    try:payload=json.loads((archive/record['key']).read_text(encoding='utf-8-sig'))
     except (OSError,ValueError):return result
     data=payload.get('data',{}) if isinstance(payload,dict) else {}
     if not isinstance(data,dict):return result

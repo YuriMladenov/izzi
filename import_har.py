@@ -8,7 +8,7 @@ RX=re.compile(r"^/DOS/(\d+)/(\d+)\.html$")
 SENSITIVE={"authorization","proxy-authorization","cookie","set-cookie","x-api-key","x-auth-token","x-csrf-token","x-xsrf-token"}
 def load(p,d):
     if archive_db.active(p):return archive_db.Index(p)
-    try:return json.loads(Path(p).read_text(encoding="utf-8"))
+    try:return json.loads(Path(p).read_text(encoding="utf-8-sig"))
     except FileNotFoundError:return d
 def save(p,o):
     if archive_db.active(p):return archive_db.write(p,o)

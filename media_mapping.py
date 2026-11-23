@@ -9,7 +9,7 @@ LESSON_RX=re.compile(r"/DOS/(\d+)/(\d+)\.html(?:$|[?#])")
 BLOCK_RX=re.compile(r"(?:block|component|id)[^0-9]{0,8}([0-9]{4,})",re.I)
 
 def load():
-    try:return json.loads(P.read_text(encoding="utf-8"))
+    try:return json.loads(P.read_text(encoding="utf-8-sig"))
     except:return {"lessons":{}}
 
 def save(x):

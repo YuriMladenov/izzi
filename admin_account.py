@@ -16,7 +16,7 @@ class AdminAccount:
         # Initialize once; never replace a customized account on restart/update.
         if not self.path.exists():self.set_account('admin','izzi',local=True)
     def record(self):
-        try:record=json.loads(self.path.read_text(encoding='utf8'))
+        try:record=json.loads(self.path.read_text(encoding='utf-8-sig'))
         except FileNotFoundError:return None
         if (not isinstance(record,dict) or record.get('version')!=1 or not isinstance(record.get('username'),str) or not re.fullmatch(r'[A-Za-z0-9_.@-]{3,64}',record.get('username',''))
             or not re.fullmatch(r'[a-f0-9]{32}',str(record.get('salt','')))

@@ -6,7 +6,7 @@ from config import STATE_DIR
 P=STATE_DIR/"capture_session.json"
 
 def load():
-    try:return json.loads(P.read_text(encoding="utf-8"))
+    try:return json.loads(P.read_text(encoding="utf-8-sig"))
     except:return {"visits":[]}
 
 def save(x):

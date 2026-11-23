@@ -94,7 +94,7 @@ class StartupSetup(unittest.TestCase):
                 self.assertIn("-Account 'PC\\Учител'",inner)
                 self.assertNotIn('Password',inner)
                 # The native script can finish before the launching process returns.
-                (root/'state/startup_task_result.json').write_text(json.dumps({'ok':True,'pending':False,'message':'Installed'}),encoding='utf8')
+                (root/'state/startup_task_result.json').write_text(json.dumps({'ok':True,'pending':False,'message':'Installed'}),encoding='utf-8-sig')
                 return SimpleNamespace(returncode=0)
             result=self.launch(root,run)
             self.assertIn('PowerShell',result['message'])
