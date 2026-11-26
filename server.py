@@ -424,10 +424,13 @@ class H(BaseHTTPRequestHandler):
             with f.open("rb") as stream:self.stream_file(stream,total)
 
     def stream_file(self,stream,remaining):
-        while remaining:
-            chunk=stream.read(min(1048576,remaining))
-            if not chunk:break
-            self.wfile.write(chunk);remaining-=len(chunk)
+        try:
+            while remaining:
+                chunk=stream.read(min(1048576,remaining))
+                if not chunk:break
+                self.wfile.write(chunk);remaining-=len(chunk)
+        except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):
+            return
 
     def archive(self,m,host,path,q):
         import school_test_data
