@@ -7,7 +7,8 @@ def page(content,title='Библиотека',active='library',search=False,cata
     groups=[('Запис и възстановяване',[
         ('operations','/__operations__','Capture и проверки','▷'),
         ('missing','/__missing__','Липсващи ресурси','↧'),
-        ('videos','/__videos__','Недовършени видеа','▶')]),
+        ('videos','/__videos__','Недовършени видеа','▶'),
+        ('transfer','/__transfer__','Пренос на учебници','⇄')]),
         ('Отчети',[
         ('capture-report','/__capture_report__','Отчет за интерактивностите','✓'),
         ('journal','/__journal__','Локален журнал','◷')]),

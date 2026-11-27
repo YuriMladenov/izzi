@@ -84,3 +84,14 @@
 .catalog-home .library-menu .menu-group h2{margin:6px 12px;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
 .library-menu nav a{min-height:42px;padding:9px 12px}
 @media(max-width:600px){.catalog-header{gap:8px;padding:0 12px}.catalog-logo img{width:80px;height:auto}.library-home-link{padding:8px;font-size:13px}.library-menu{margin-left:0}.library-menu>summary{padding:10px;font-size:13px}.admin-login-link{margin-left:0;font-size:12px}.library-menu nav{width:min(320px,calc(100vw - 24px))}}
+
+.transfer-book{display:flex;align-items:center;gap:10px;cursor:pointer}
+.transfer-result{margin-top:18px;padding:16px 18px;background:#fff;border:1px solid var(--line);border-radius:10px}
+.transfer-result p{margin:0 0 6px;line-height:1.6}
+.transfer-result p:last-child{margin-bottom:0}
+#book-transfer .task-panel h2{margin:0 0 14px}
+#book-transfer .table-wrap{max-height:420px;overflow:auto;margin:16px 0}
+#book-transfer table td:last-child{color:var(--muted);font-variant-numeric:tabular-nums;width:120px}
+#transfer-count{color:var(--muted);font-size:13px}
+#transfer-progress{min-height:1.4em;color:var(--muted);font-size:13px}
+#transfer-file{padding:10px;border:1px dashed #c8d7d0;border-radius:10px;background:#fff;max-width:100%}

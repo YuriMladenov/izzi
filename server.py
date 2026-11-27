@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-import html,json,mimetypes,re,time,hashlib,gzip,os,threading,sys
+import html,json,mimetypes,re,tempfile,time,hashlib,gzip,os,threading,sys,zipfile
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from pathlib import Path
 from html.parser import HTMLParser
@@ -325,7 +325,7 @@ def current_missing(events,mapping):
         if key in seen:continue
         seen.add(key);ext=Path(path).suffix.lower()
         row=find(mapping,host,path,query,lambda r:usable_body(r,ARCHIVE_DIR,ext))
-        local_ui=host==SOURCE_HOST and path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/videos.js','/__ui__/maintenance.js','/__ui__/izzi-logo.svg') and (webui.ASSETS/Path(path).name).is_file()
+        local_ui=host==SOURCE_HOST and path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/videos.js','/__ui__/maintenance.js','/__ui__/transfer.js','/__ui__/izzi-logo.svg') and (webui.ASSETS/Path(path).name).is_file()
         if row or local_ui or bundled_assets.asset(host,path) or geogebra_runtime.asset(host,path):resolved+=1;continue
         old=find(mapping,host,path,query)
         category='OPTIONAL' if optional_reason('https://'+host+path) else (
@@ -579,10 +579,11 @@ class H(BaseHTTPRequestHandler):
                     content+='<tr>'+''.join('<td>'+html.escape(str(value))+'</td>' for value in (title+(' ('+parent+')' if parent else ''),kinds.get(item['kind'],item['kind']),labels.get(item['state'],item['state']),item['reason']))+'</tr>'
                 content+='</tbody></table></section>'
             return self.sendb(self.ui(content,'Отчет за интерактивностите','capture-report').encode(),'text/html; charset=utf-8')
+        if p.path in ('/__transfer__','/__transfer__/download'):return self.transfer_page(p)
         readonly=not self.admin_allowed()
-        if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__','/__cleanup__','/__videos__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/','/__videos__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
+        if readonly and (p.path in ('/__missing__','/__journal__','/__help__','/__operations__','/__cleanup__','/__videos__','/__transfer__') or p.path.startswith(('/__ops__/','/__catalog__/','/__delete_book__/','/__videos__/')) or (p.path.startswith('/__book__/') and 'edit' in parse_qs(p.query))):
             return self.sendb(b'Administrator required','text/plain; charset=utf-8',403)
-        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/videos.js','/__ui__/maintenance.js','/__ui__/izzi-logo.svg'):
+        if p.path in ('/__ui__/app.css','/__ui__/app.js','/__ui__/operations.js','/__ui__/videos.js','/__ui__/maintenance.js','/__ui__/transfer.js','/__ui__/izzi-logo.svg'):
             filename=p.path.rsplit('/',1)[1]
             return self.send_cached((webui.ASSETS/filename).read_bytes(),'image/svg+xml' if filename.endswith('.svg') else 'text/css; charset=utf-8' if filename.endswith('.css') else 'application/javascript; charset=utf-8')
         if p.path=='/__videos__':return self.videos_page()
@@ -797,6 +798,7 @@ class H(BaseHTTPRequestHandler):
         if urlparse(self.path).path=='/__maintenance__/action':return self.maintenance_action()
         if urlparse(self.path).path.startswith('/__admin__'):return self.admin_action()
         if urlparse(self.path).path=='/__cleanup__':return self.cleanup_action()
+        if urlparse(self.path).path in ('/__transfer__/inspect','/__transfer__/import'):return self.transfer_action()
         if urlparse(self.path).path.startswith('/__delete_book__/'):return self.delete_book_action()
         if urlparse(self.path).path in ('/__ops__/action','/__videos__/action'):return self.control_action()
         if urlparse(self.path).path.startswith('/__catalog__/'):
@@ -941,6 +943,96 @@ class H(BaseHTTPRequestHandler):
         except (OSError,ValueError,TimeoutError) as error:
             self.close_connection=True
             return self.sendb(json.dumps({'error':str(error)},ensure_ascii=False).encode(),'application/json',400)
+
+    def transfer_page(self,p):
+        import book_transfer
+        if not self.admin_allowed():return self.sendb(b'Administrator required','text/plain',403)
+        query=parse_qs(p.query)
+        if p.path=='/__transfer__/download':
+            selection=[b for b in (query.get('books') or [''])[0].split(',') if b.strip()]
+            if not selection:return self.sendb('No books selected'.encode(),'text/plain; charset=utf-8',400)
+            try:
+                books=book_transfer.parse_selection(selection,book_transfer.known_books(STATE_DIR))
+            except book_transfer.TransferError as error:return self.sendb(str(error).encode(),'text/plain; charset=utf-8',400)
+            allow=query.get('allow_missing')==['1']
+            fd,name=tempfile.mkstemp(prefix='izzi-transfer-',suffix='.zip',dir=STATE_DIR);os.close(fd)
+            temp=Path(name)
+            try:
+                result=book_transfer.export(books,STATE_DIR,ARCHIVE_DIR,temp,allow_missing=allow)
+                size=temp.stat().st_size
+                print('[TRANSFER EXPORT]',','.join(books),size)
+                self.send_response(200);self.send_header('Content-Type','application/zip')
+                self.send_header('Content-Length',str(size));self.send_header('Cache-Control','no-store')
+                self.send_header('Content-Disposition','attachment; filename="%s"'%book_transfer.package_name(books,result['books']))
+                self.end_headers()
+                if self.command!='HEAD':
+                    with temp.open('rb') as stream:self.stream_file(stream,size)
+            except book_transfer.TransferError as error:
+                return self.sendb(str(error).encode(),'text/plain; charset=utf-8',400)
+            except (OSError,zipfile.BadZipFile) as error:
+                print('[TRANSFER EXPORT ERROR]',type(error).__name__)
+                return self.sendb(('Export failed: %s'%error).encode(),'text/plain; charset=utf-8',500)
+            finally:temp.unlink(missing_ok=True)
+            return
+        try:books=book_transfer.known_books(STATE_DIR)
+        except (OSError,ValueError):books={}
+        rows=''.join('<tr><td><label class="transfer-book"><input type="checkbox" data-book value="%s"> %s</label></td><td>%s</td></tr>'%(html.escape(bid,quote=True),html.escape(title),html.escape(bid)) for bid,title in sorted(books.items(),key=lambda item:item[1]))
+        content=('<h1>Пренос на учебници</h1>'
+            '<div id="book-transfer" data-token="%s">'
+            '<p>Експортирай избрани учебници в един ZIP и го внеси на друга машина. Пакетът съдържа архивните файлове, индекса, каталога, media mappings и връзките за тези учебници. Не е нужен интернет.</p>'
+            '<section class="task-panel"><h2>1. Експорт</h2>'
+            '<p><button type="button" id="transfer-all">Избери всички</button> <button type="button" id="transfer-none">Изчисти</button> <span id="transfer-count" role="status"></span></p>'
+            '<div class="table-wrap"><table><tr><th>Учебник</th><th>ID</th></tr>%s</table></div>'
+            '<p><label><input type="checkbox" id="transfer-missing"> Разреши експорт, когато липсват файлове (уроците ще дават „Not captured“ и на новата машина)</label></p>'
+            '<p><button type="button" id="transfer-export" disabled>Изтегли пакета</button></p>'
+            '<p id="transfer-progress" role="status"></p>'
+            '</section>'
+            '<section class="task-panel"><h2>2. Импорт</h2>'
+            '<p>Избери ZIP пакет от друга инсталация. Съществуващите учебници, които не са в пакета, остават непокътнати.</p>'
+            '<p><input type="file" id="transfer-file" accept=".zip,application/zip"></p>'
+            '<p id="transfer-size"></p>'
+            '<p><label><input type="checkbox" id="transfer-replace"> Обнови учебниците, които вече съществуват</label></p>'
+            '<p><button type="button" id="transfer-inspect">Провери пакета</button> <button type="button" id="transfer-import">Внеси</button></p>'
+            '<div id="transfer-result" class="transfer-result" hidden></div>'
+            '<p id="transfer-message" role="status"></p>'
+            '</section></div><script src="/__ui__/transfer.js" defer></script>')%(html.escape(operations.tasks.token,quote=True),rows)
+        if not books:content=content.replace('<div class="table-wrap">','<p class="empty">Библиотеката е празна. Импортирай пакет от друга инсталация.</p><div class="table-wrap" hidden>')
+        return self.sendb(self.ui(content,'Пренос на учебници','transfer').encode(),'text/html; charset=utf-8')
+
+    def transfer_action(self):
+        import book_transfer
+        is_import=urlparse(self.path).path.endswith('/import')
+        if not self.admin_allowed() or not self.origin_valid() or self.headers.get('X-IZZI-Control')!=operations.tasks.token:
+            self.close_connection=True;return self.sendb(b'{"error":"Administrator confirmation required"}','application/json',403)
+        upload=None;uploaded=0
+        try:
+            length=int(self.headers.get('Content-Length','0'))
+            if not 0<length<=book_transfer.MAX_UPLOAD:raise ValueError('Пакетът е по-голям от допустимия размер.')
+            query=parse_qs(urlparse(self.path).query)
+            suffix=os.path.splitext((query.get('filename') or [''])[0])[1].lower()
+            fd,name=tempfile.mkstemp(prefix='izzi-upload-',suffix=suffix if suffix in ('.zip','') else '.zip',dir=STATE_DIR)
+            upload=Path(name)
+            self.connection.settimeout(600)
+            with os.fdopen(fd,'wb') as out:
+                remaining=length
+                while remaining:
+                    chunk=self.rfile.read(min(1048576,remaining))
+                    if not chunk:raise ValueError('Качването беше прекъснато.')
+                    out.write(chunk);uploaded+=len(chunk);remaining-=len(chunk)
+            if is_import:
+                result=book_transfer.import_books(upload,STATE_DIR,ARCHIVE_DIR,replace=query.get('replace')==['1'])
+                print('[TRANSFER IMPORT]',','.join(result['books']),result['copied'],uploaded)
+            else:
+                result=book_transfer.preview(upload,STATE_DIR,ARCHIVE_DIR)
+                print('[TRANSFER INSPECT]',','.join(result['books']),uploaded)
+            return self.sendb(json.dumps(result,ensure_ascii=False).encode(),'application/json')
+        except book_transfer.TransferError as error:
+            self.close_connection=True;return self.sendb(json.dumps({'error':str(error)},ensure_ascii=False).encode(),'application/json',400)
+        except (OSError,ValueError,TimeoutError) as error:
+            self.close_connection=True;print('[TRANSFER ERROR]',type(error).__name__)
+            return self.sendb(json.dumps({'error':str(error) or 'Грешка при преноса.'},ensure_ascii=False).encode(),'application/json',400)
+        finally:
+            if upload is not None:upload.unlink(missing_ok=True)
 
     def control_action(self):
         origin=self.headers.get('Origin')
