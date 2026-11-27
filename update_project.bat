@@ -40,16 +40,37 @@ echo The update uses fast-forward only. It does not reset or clean your files.
 pause
 
 echo Fetching main...
-git fetch origin refs/heads/main:refs/remotes/origin/main
+rem A remote-tracking ref is only updated with the "+" refspec. Without it Git
+rem refuses with "non-fast-forward" whenever origin/main already points at a
+rem different commit, for example after a manual fetch. --prune also removes
+rem deleted branches without touching archive/ or state/.
+git fetch --prune origin
 if errorlevel 1 (
     echo ERROR: Could not fetch main. Read the Git message above.
     goto failed
 )
 
+git show-ref --verify --quiet refs/remotes/origin/main
+if errorlevel 1 (
+    echo ERROR: origin/main is missing after fetching. Check the origin URL.
+    goto failed
+)
+
 git merge-base --is-ancestor HEAD refs/remotes/origin/main
 if errorlevel 1 (
-    echo ERROR: The current branch has commits not included in origin/main.
+    echo ERROR: The current branch has commits that are not in origin/main.
     echo Update stopped. Your local commits were preserved.
+    echo.
+    echo The checkout is probably on an old side branch that was merged into main
+    echo under a different name. Check what gets replaced before continuing:
+    echo     git log --oneline -5
+    echo     git log --oneline -5 refs/remotes/origin/main
+    echo.
+    echo To keep your work, move it aside first:
+    echo     git branch backup-before-update
+    echo To switch to the published code, run:
+    echo     git reset --hard refs/remotes/origin/main
+    echo Your archive and state folders are ignored by Git and are not touched.
     goto failed
 )
 
